@@ -44,6 +44,7 @@ jobs:
           COVERAGE=$(python -c "import xmltodict; d=xmltodict.parse(open('coverage.xml').read()); print(d['coverage']['@line-rate'])")
           PERCENT=$(python -c "print(int(round(float('$COVERAGE')*100)))")
           echo '{"schemaVersion":1,"label":"coverage","message":"'${PERCENT}'%","color":"green"}' > coverage-summary.json
+          CONTENT=$(cat coverage-summary.json | python -c 'import json,sys; print(json.dumps(sys.stdin.read()))')
           curl -X PATCH -H "Authorization: token $GIST_TOKEN" \
-            -d @<(echo '{"files": {"coverage-summary.json": {"content": '$(cat coverage-summary.json)'}}}') \
+            -d "{\"files\": {\"coverage-summary.json\": {\"content\": $CONTENT}}}" \
             https://api.github.com/gists/$GIST_ID
