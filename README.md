@@ -13,19 +13,19 @@ Pyjobkit is a backend-agnostic toolkit for building reliable asynchronous job pr
 - **Observability hooks** – A memory log sink and an in-process event bus are included so executors can emit structured logs and progress updates without depending on a specific logging stack.
 - **CLI worker** – The `pyjobkit` console script wires together the SQL backend with built-in executors and exposes flags for DSN, concurrency, lease TTL, polling interval, and Postgres `SKIP LOCKED` tuning.
 
+
 ## Installation
 ```bash
-pip install pyjobkit
-# or install from source
+# install from source
 pip install -e .
 ```
 
-Optional extras bring in async database drivers for different SQL engines:
+Optional extras for async database drivers (install manually):
 
 ```bash
-pip install "pyjobkit[pg]"      # asyncpg for PostgreSQL
-pip install "pyjobkit[mysql]"   # aiomysql for MySQL
-pip install "pyjobkit[sqlite]"  # aiosqlite for SQLite
+pip install asyncpg      # for PostgreSQL
+pip install aiomysql     # for MySQL
+pip install aiosqlite    # for SQLite
 ```
 
 ## Getting started
