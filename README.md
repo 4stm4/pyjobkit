@@ -11,7 +11,7 @@ Pyjobkit is a backend-agnostic toolkit for building reliable asynchronous job pr
 - **Async worker loop** – `pyjobkit.worker.Worker` is built on `asyncio.TaskGroup`, supports concurrency limits, batch polling, lease extension, and jittered polling to minimize thundering herds.
 - **Composable executors** – Executors implement a simple `run(job_id, payload, ctx)` coroutine. The package ships with an HTTP executor for calling webhooks and a subprocess executor for shell jobs, and you can add your own by conforming to the `Executor` protocol.
 - **Observability hooks** – A memory log sink and an in-process event bus are included so executors can emit structured logs and progress updates without depending on a specific logging stack.
-- **CLI worker** – The `pyjobkit-worker` console script wires together the SQL backend with built-in executors and exposes flags for DSN, concurrency, lease TTL, polling interval, and Postgres `SKIP LOCKED` tuning.
+- **CLI worker** – The `pyjobkit` console script wires together the SQL backend with built-in executors and exposes flags for DSN, concurrency, lease TTL, polling interval, and Postgres `SKIP LOCKED` tuning.
 
 ## Installation
 ```bash
@@ -88,7 +88,7 @@ Manage migrations however you prefer (Alembic, plain SQL files, etc.)—only the
 Once the schema exists, you can run the provided worker process:
 
 ```bash
-pyjobkit-worker --dsn postgresql+asyncpg://user:pass@host/db \
+pyjobkit --dsn postgresql+asyncpg://user:pass@host/db \
     --concurrency 8 \
     --batch 4 \
     --lease-ttl 30 \

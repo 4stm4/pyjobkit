@@ -1,4 +1,4 @@
-"""Tests for the jobkit CLI entry point."""
+"""Tests for the Pyjobkit CLI entry point."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import asyncio
 import runpy
 import sys
 
-from jobkit import cli
+from pyjobkit import cli
 
 
 def test_cli_main_invokes_async_entrypoint(monkeypatch) -> None:
@@ -17,7 +17,7 @@ def test_cli_main_invokes_async_entrypoint(monkeypatch) -> None:
         ran.append(args)
 
     monkeypatch.setattr(cli, "_run_worker", fake_run)
-    monkeypatch.setattr(sys, "argv", ["jobkit-worker", "--dsn", "sqlite://", "--batch", "2"])
+    monkeypatch.setattr(sys, "argv", ["pyjobkit", "--dsn", "sqlite://", "--batch", "2"])
     cli.main()
     assert ran and ran[0].dsn == "sqlite://"
 
@@ -78,7 +78,7 @@ def test_cli_main_handles_keyboard_interrupt(monkeypatch) -> None:
 
     monkeypatch.setattr(cli, "_run_worker", fake_run)
     monkeypatch.setattr(cli.asyncio, "run", fake_asyncio_run)
-    monkeypatch.setattr(sys, "argv", ["jobkit-worker", "--dsn", "sqlite://"])
+    monkeypatch.setattr(sys, "argv", ["pyjobkit", "--dsn", "sqlite://"])
     cli.main()
 
 
@@ -117,17 +117,17 @@ def test_cli_module_entrypoint(monkeypatch) -> None:
             loop.close()
 
     monkeypatch.setattr("sqlalchemy.ext.asyncio.create_async_engine", fake_create_engine)
-    monkeypatch.setattr("jobkit.backends.sql.backend.SQLBackend", FakeBackend)
-    monkeypatch.setattr("jobkit.engine.Engine", FakeEngine)
-    monkeypatch.setattr("jobkit.worker.Worker", FakeWorker)
-    monkeypatch.setattr("jobkit.executors.subprocess.SubprocessExecutor", DummyExecutor)
-    monkeypatch.setattr("jobkit.executors.http.HttpExecutor", DummyExecutor)
+    monkeypatch.setattr("pyjobkit.backends.sql.backend.SQLBackend", FakeBackend)
+    monkeypatch.setattr("pyjobkit.engine.Engine", FakeEngine)
+    monkeypatch.setattr("pyjobkit.worker.Worker", FakeWorker)
+    monkeypatch.setattr("pyjobkit.executors.subprocess.SubprocessExecutor", DummyExecutor)
+    monkeypatch.setattr("pyjobkit.executors.http.HttpExecutor", DummyExecutor)
     monkeypatch.setattr(cli.asyncio, "run", fake_asyncio_run)
-    monkeypatch.setattr(sys, "argv", ["jobkit-worker", "--dsn", "sqlite://"])
-    existing_cli = sys.modules.pop("jobkit.cli", None)
+    monkeypatch.setattr(sys, "argv", ["pyjobkit", "--dsn", "sqlite://"])
+    existing_cli = sys.modules.pop("pyjobkit.cli", None)
     try:
-        runpy.run_module("jobkit.cli", run_name="__main__")
+        runpy.run_module("pyjobkit.cli", run_name="__main__")
     finally:
         if existing_cli is not None:
-            sys.modules["jobkit.cli"] = existing_cli
+            sys.modules["pyjobkit.cli"] = existing_cli
     assert created["worker_run"]

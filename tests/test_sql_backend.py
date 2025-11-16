@@ -11,8 +11,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from jobkit.backends.sql.backend import SQLBackend
-from jobkit.backends.sql.schema import metadata
+from pyjobkit.backends.sql.backend import SQLBackend
+from pyjobkit.backends.sql.schema import metadata
 
 
 class _AsyncSessionWrapper:
@@ -222,7 +222,7 @@ def test_sql_backend_init_and_claim_generic_rollback(monkeypatch) -> None:
         created["expire"] = expire_on_commit
         return "factory"
 
-    monkeypatch.setattr("jobkit.backends.sql.backend.async_sessionmaker", fake_sessionmaker)
+    monkeypatch.setattr("pyjobkit.backends.sql.backend.async_sessionmaker", fake_sessionmaker)
     engine = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
     backend = SQLBackend(engine, prefer_pg_skip_locked=True, lease_ttl_s=9)
     assert backend.sessionmaker == "factory"

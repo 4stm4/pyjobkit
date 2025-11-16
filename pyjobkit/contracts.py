@@ -1,4 +1,4 @@
-"""Core contracts used by Jobkit components."""
+"""Core contracts used by Pyjobkit components."""
 
 from __future__ import annotations
 

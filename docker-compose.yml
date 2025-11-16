@@ -1,6 +1,6 @@
 services:
   taskboard:
-    container_name: jobkit-taskboard
+    container_name: pyjobkit-taskboard
     build:
       context: .
       dockerfile: examples/taskboard/Dockerfile

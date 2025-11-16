@@ -1,12 +1,12 @@
 # Taskboard demo
 
-This example spins up a FastAPI application plus an in-process Jobkit worker.  The
+This example spins up a FastAPI application plus an in-process Pyjobkit worker.  The
 single-page UI lets you enqueue demo jobs that simply sleep for a random
 interval and then complete.
 
 ## Running locally
 
-1. Install Jobkit and the extra demo dependencies:
+1. Install Pyjobkit and the extra demo dependencies:
 
    ```bash
    pip install -e .
@@ -27,8 +27,8 @@ table.
 You can also run the demo in a container built from the repository root:
 
 ```bash
-docker build -f examples/taskboard/Dockerfile -t jobkit-taskboard .
-docker run --rm -p 8000:8000 jobkit-taskboard
+docker build -f examples/taskboard/Dockerfile -t pyjobkit-taskboard .
+docker run --rm -p 8000:8000 pyjobkit-taskboard
 ```
 
 If you're orchestrating containers with Docker Compose (or a tool like

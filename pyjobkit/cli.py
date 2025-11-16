@@ -1,4 +1,4 @@
-"""Entry-point for the ``jobkit-worker`` console script."""
+"""Entry-point for the ``pyjobkit`` console script."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ async def _run_worker(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run a Jobkit worker loop")
+    parser = argparse.ArgumentParser(description="Run a Pyjobkit worker loop")
     parser.add_argument("--dsn", required=True, help="SQLAlchemy async DSN")
     parser.add_argument("--concurrency", type=int, default=8)
     parser.add_argument("--batch", type=int, default=1)

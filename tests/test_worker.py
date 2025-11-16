@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from jobkit.worker import Worker
+from pyjobkit.worker import Worker
 
 
 class _DummyCtx:
@@ -98,7 +98,7 @@ def test_worker_run_processes_rows(monkeypatch) -> None:
         assert backend.succeeded == [(job_id, {"ok": True})]
         assert backend.extended  # lease loop kicked in
 
-    monkeypatch.setattr("jobkit.worker.random.random", lambda: 0.0)
+    monkeypatch.setattr("pyjobkit.worker.random.random", lambda: 0.0)
     asyncio.run(_run())
 
 
