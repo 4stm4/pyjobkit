@@ -1,7 +1,26 @@
 services:
   taskboard:
+    image: python:3.13-slim
     container_name: pyjobkit-taskboard
-    image: pyjobkit-taskboard
+    working_dir: /app
+    restart: unless-stopped
     ports:
       - "8000:8000"
-    restart: unless-stopped
+    command:
+      - /bin/bash
+      - -c
+      - |
+        set -e
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq
+        apt-get install -y -qq --no-install-recommends gcc git
+        rm -rf /var/lib/apt/lists/*
+        python -m pip install --no-cache-dir --upgrade pip setuptools wheel
+        # Clone this repository and install package + runtime deps
+        cd /tmp
+        rm -rf pyjobkit
+        git clone --depth 1 https://github.com/4stm4/pyjobkit.git pyjobkit
+        cd pyjobkit
+        python -m pip install --no-cache-dir -e . fastapi uvicorn
+        # Run the demo taskboard app
+        exec uvicorn examples.taskboard.app:app --host 0.0.0.0 --port 8000
