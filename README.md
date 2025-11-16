@@ -102,6 +102,9 @@ Use `--disable-skip-locked` when targeting databases that do not support the Pos
 - **Alternate backends** – Implement the `QueueBackend` protocol to target message brokers or proprietary queues while reusing the worker and executor layers.
 - **Logging & events** – Swap the memory log sink or event bus with your own implementations (e.g., stream to Loki or publish over Redis) by passing them to the `Engine` constructor.
 
+## Examples
+- [`examples/taskboard`](examples/taskboard) – A single-page FastAPI dashboard that enqueues demo jobs which sleep for a random duration using the in-memory backend. Includes a Dockerfile for quick demos.
+
 ## Requirements
 - Python 3.13+
 - An asyncio-compatible event loop (the worker uses `asyncio.TaskGroup`)
