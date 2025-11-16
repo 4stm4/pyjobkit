@@ -40,8 +40,10 @@ jobs:
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
           GIST_ID: 99574c3e4a5b6f3890c375bde7e1f0cd
         run: |
-          pip install xmltodict requests
+          pip install xmltodict
           COVERAGE=$(python -c "import xmltodict; d=xmltodict.parse(open('coverage.xml').read()); print(d['coverage']['@line-rate'])")
           PERCENT=$(python -c "print(int(round(float('$COVERAGE')*100)))")
-          echo '{"schemaVersion":1,"label":"coverage","message":"'$PERCENT'%","color":"green"}' > coverage-summary.json
-          curl -X PATCH -H "Authorization: token $GIST_TOKEN" -d '{"files": {"coverage-summary.json": {"content": '"'$(cat coverage-summary.json | python -c 'import json,sys; print(json.dumps(sys.stdin.read()))')'"'}}}' https://api.github.com/gists/$GIST_ID
+          echo '{"schemaVersion":1,"label":"coverage","message":"'${PERCENT}'%","color":"green"}' > coverage-summary.json
+          curl -X PATCH -H "Authorization: token $GIST_TOKEN" \
+            -d @<(echo '{"files": {"coverage-summary.json": {"content": '$(cat coverage-summary.json)'}}}') \
+            https://api.github.com/gists/$GIST_ID
