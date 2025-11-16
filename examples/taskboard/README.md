@@ -31,5 +31,13 @@ docker build -f examples/taskboard/Dockerfile -t jobkit-taskboard .
 docker run --rm -p 8000:8000 jobkit-taskboard
 ```
 
-The container uses the in-memory backend, so job history is reset whenever the
-process restarts.
+If you're orchestrating containers with Docker Compose (or a tool like
+Portainer), the repository root ships with a `docker-compose.yml` that exposes
+the same FastAPI server as a `taskboard` service:
+
+```bash
+docker compose up --build taskboard
+```
+
+The container uses the in-memory backend in either case, so job history is
+reset whenever the process restarts.
