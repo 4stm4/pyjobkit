@@ -109,7 +109,7 @@ Use `--disable-skip-locked` when targeting databases that do not support the Pos
 
 ### Demo dashboard screenshot
 
-![Taskboard demo screenshot](attachments/pyjobkit_demo_dashboard.png)
+![Taskboard demo screenshot](pyjobkit_demo_dashboard.png)
 
 
 ### Running the Taskboard demo with Docker Compose
