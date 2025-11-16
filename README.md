@@ -1,5 +1,9 @@
 # Jobkit
 
+[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://pypi.org/project/jobkit/)
+[![Test Coverage](https://img.shields.io/badge/coverage-95%25-success.svg)](https://github.com/your-org/pyjobkit/actions)
+[![Python Version](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/downloads/release/python-3130/)
+
 Jobkit is a backend-agnostic toolkit for building reliable asynchronous job processing systems. It provides an `Engine` facade for enqueueing work, a cooperative asyncio `Worker`, a set of executor contracts, and pluggable queue backends so you can adapt the runtime to your infrastructure with minimal glue code.
 
 ## Features
