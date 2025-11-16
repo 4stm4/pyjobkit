@@ -38,8 +38,7 @@ class QueueBackend(Protocol):
         scheduled_for: datetime | None = None,
         max_attempts: int = 3,
         idempotency_key: str | None = None,
-        timeout_s: int | None = None,
-    ) -> UUID: ...
+        timeout_s: int | None = None,) -> UUID: ...
 
     async def get(self, job_id: UUID) -> dict: ...
 
