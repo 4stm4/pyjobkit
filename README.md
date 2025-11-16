@@ -1,7 +1,7 @@
 # Pyjobkit
 
 [![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://pypi.org/project/pyjobkit/)
-[![Test Coverage](https://img.shields.io/badge/coverage-95%25-success.svg)](https://github.com/your-org/pyjobkit/actions)
+[![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/4stm4/99574c3e4a5b6f3890c375bde7e1f0cd/raw/coverage-summary.json)](https://github.com/4stm4/pyjobkit/actions)
 [![Python Version](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/downloads/release/python-3130/)
 
 Pyjobkit is a backend-agnostic toolkit for building reliable asynchronous job processing systems. It provides an `Engine` facade for enqueueing work, a cooperative asyncio `Worker`, a set of executor contracts, and pluggable queue backends so you can adapt the runtime to your infrastructure with minimal glue code.
@@ -102,14 +102,21 @@ Use `--disable-skip-locked` when targeting databases that do not support the Pos
 - **Alternate backends** – Implement the `QueueBackend` protocol to target message brokers or proprietary queues while reusing the worker and executor layers.
 - **Logging & events** – Swap the memory log sink or event bus with your own implementations (e.g., stream to Loki or publish over Redis) by passing them to the `Engine` constructor.
 
+
+
 ## Examples
 - [`examples/taskboard`](examples/taskboard) – A single-page FastAPI dashboard that enqueues demo jobs which sleep for a random duration using the in-memory backend. Includes a Dockerfile for quick demos.
 
+### Demo dashboard screenshot
+
+![Taskboard demo screenshot](attachments/pyjobkit_demo_dashboard.png)
+
+
 ### Running the Taskboard demo with Docker Compose
-The repository ships with a minimal `docker-compose.yml` that builds and runs the taskboard FastAPI app:
+The repository ships with a minimal `docker-compose.yml` that runs the taskboard FastAPI app using the official Python image and a runtime install script:
 
 ```bash
-docker compose up --build taskboard
+docker compose up taskboard
 # open http://localhost:8000 to view the UI
 ```
 
@@ -127,28 +134,29 @@ docker compose up --build taskboard
 > DOCKER_BUILDKIT=0 docker compose up --build taskboard
 > ```
 >
-> The legacy builder falls back to HTTP/1.1 and succeeds in environments where BuildKit cannot establish its HTTP/2 connection. Обратите внимание, что форма **Environment variables** в Portainer передаёт значения только в сам Compose-файл, поэтому переменная `DOCKER_BUILDKIT` из этой формы не отключит BuildKit. Для порталов Portainer используйте один из вариантов ниже.
+> The legacy builder falls back to HTTP/1.1 and succeeds in environments where BuildKit cannot establish its HTTP/2 connection. Note: the **Environment variables** form in Portainer only passes values to the Compose file itself, so setting `DOCKER_BUILDKIT` there will not disable BuildKit. For Portainer, use one of the approaches below.
 
-### Запуск демо Taskboard в Portainer
+### Running the Taskboard demo in Portainer
 
-Ниже приведён проверенный сценарий, позволяющий поднять демо-стек `examples/taskboard` на хосте, которым управляет Portainer.
+Below is a proven scenario for running the `examples/taskboard` demo stack on a host managed by Portainer.
 
-1. На хосте Docker, где запущен Portainer agent / standalone-демон, временно отключите BuildKit на уровне демона. Добавьте в `/etc/docker/daemon.json` секцию `features.buildkit: false` (если файл отсутствует — создайте его):
+1. Make sure your Docker host (where Portainer agent or standalone daemon runs) has internet access for git and pip.
+2. In Portainer, go to **Stacks → Add stack → Web editor**.
+3. Copy the contents of your updated `docker-compose.yml` (from this repository) into the editor. Make sure only the `taskboard` service is present in the YAML.
+4. Click **Deploy the stack**. Portainer will pull the official `python:3.13-slim` image, install dependencies, clone the repository, and start the FastAPI app.
 
-   ```json
-   {
-     "features": {
-       "buildkit": false
-     }
-   }
-   ```
+> 💡 All jobs and data are stored in memory. Restarting the container will reset the job history. For production, consider building and publishing your own image to a registry.
 
-   Затем перезапустите Docker (`sudo systemctl restart docker`). После перезапуска проверка `docker info | grep -i buildkit` должна показать `Buildkit: false`.
-2. В Portainer перейдите в **Stacks → Add stack → Web editor**.
-3. Скопируйте содержимое `docker-compose.yml` из репозитория (или нажмите **Load Compose file** и укажите Git URL `https://github.com/your-org/pyjobkit` плюс путь `docker-compose.yml`). Убедитесь, что в YAML осталась только служба `taskboard`.
-4. Нажмите **Deploy the stack**. Поскольку BuildKit отключён на самом демоне, Portainer выполнит сборку Dockerfile из `examples/taskboard` через классический билдер и стек успешно поднимется.
+#### Local run (alternative)
 
-> 💡 Если требуется вернуть BuildKit после деплоя, снова измените `daemon.json`, установив `"buildkit": true`, и перезапустите Docker. Для ручных запусков вне Portainer достаточно добавлять `DOCKER_BUILDKIT=0` к команде `docker compose`.
+```bash
+docker compose up taskboard
+```
+
+#### Notes
+- All jobs and demo data are stored in memory; restarting the container clears the history.
+- For production, build and push your own image to a registry.
+- If you need to access a private repository, use environment variables to pass a token or SSH key.
 
 ## Requirements
 - Python 3.13+

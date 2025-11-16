@@ -1,3 +1,4 @@
+
 name: PyJobKit Pipeline
 
 on:
@@ -25,6 +26,22 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install .
-          pip install pytest
-      - name: Run tests
-        run: pytest
+          pip install pytest pytest-cov
+      - name: Run tests with coverage
+        run: pytest --cov=pyjobkit --cov-report=xml --cov-report=term
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+
+      - name: Update coverage badge gist
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+          GIST_ID: 99574c3e4a5b6f3890c375bde7e1f0cd
+        run: |
+          pip install xmltodict requests
+          COVERAGE=$(python -c "import xmltodict; d=xmltodict.parse(open('coverage.xml').read()); print(d['coverage']['@line-rate'])")
+          PERCENT=$(python -c "print(int(round(float('$COVERAGE')*100)))")
+          echo '{"schemaVersion":1,"label":"coverage","message":"'$PERCENT'%","color":"green"}' > coverage-summary.json
+          curl -X PATCH -H "Authorization: token $GIST_TOKEN" -d '{"files": {"coverage-summary.json": {"content": '"'$(cat coverage-summary.json | python -c 'import json,sys; print(json.dumps(sys.stdin.read()))')'"'}}}' https://api.github.com/gists/$GIST_ID
