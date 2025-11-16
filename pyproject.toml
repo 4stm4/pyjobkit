@@ -14,7 +14,7 @@ mysql = ["aiomysql"]
 sqlite = ["aiosqlite"]
 
 [project.scripts]
-jobkit-worker = "jobkit.cli:main"
+pyjobkit = "pyjobkit.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]

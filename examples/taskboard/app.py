@@ -1,4 +1,4 @@
-"""One-page demo dashboard for Jobkit using FastAPI and the memory backend."""
+"""One-page demo dashboard for Pyjobkit using FastAPI and the memory backend."""
 
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
-from jobkit import Engine, Worker
-from jobkit.backends.memory import MemoryBackend
-from jobkit.contracts import ExecContext, Executor
+from pyjobkit import Engine, Worker
+from pyjobkit.backends.memory import MemoryBackend
+from pyjobkit.contracts import ExecContext, Executor
 
 
 class InspectableMemoryBackend(MemoryBackend):
@@ -42,7 +42,7 @@ class DemoSleepExecutor(Executor):
 backend = InspectableMemoryBackend()
 engine = Engine(backend=backend, executors=[DemoSleepExecutor()])
 worker = Worker(engine, max_concurrency=4, batch=4)
-app = FastAPI(title="Jobkit taskboard demo")
+app = FastAPI(title="Pyjobkit taskboard demo")
 
 
 @app.on_event("startup")
@@ -113,7 +113,7 @@ PAGE_HTML = """
 <html lang=\"en\">
   <head>
     <meta charset=\"utf-8\">
-    <title>Jobkit demo dashboard</title>
+    <title>Pyjobkit demo dashboard</title>
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
     <style>
       body { font-family: system-ui, sans-serif; margin: 0; padding: 2rem; background: #f9fafb; }
@@ -134,7 +134,7 @@ PAGE_HTML = """
     </style>
   </head>
   <body>
-    <h1>Jobkit demo dashboard</h1>
+    <h1>Pyjobkit demo dashboard</h1>
     <p>Press the button to enqueue demo jobs that sleep for a random duration.</p>
     <button id=\"enqueue\">Enqueue demo job</button>
     <table>

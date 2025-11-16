@@ -1,4 +1,4 @@
-"""Jobkit: backend-agnostic job processing toolkit."""
+"""Pyjobkit: backend-agnostic job processing toolkit."""
 
 from .engine import Engine
 from .worker import Worker

@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from jobkit.backends.memory import MemoryBackend
+from pyjobkit.backends.memory import MemoryBackend
 
 
 UTC = timezone.utc

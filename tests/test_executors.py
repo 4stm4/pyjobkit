@@ -9,8 +9,8 @@ from uuid import uuid4
 
 import pytest
 
-from jobkit.executors.http import HttpExecutor
-from jobkit.executors.subprocess import SubprocessExecutor
+from pyjobkit.executors.http import HttpExecutor
+from pyjobkit.executors.subprocess import SubprocessExecutor
 
 
 class _Ctx:
@@ -55,7 +55,7 @@ def _patch_http_client(monkeypatch, responses: List[object]) -> None:
                 raise resp
             return resp
 
-    monkeypatch.setattr("jobkit.executors.http.httpx.AsyncClient", _Client)
+    monkeypatch.setattr("pyjobkit.executors.http.httpx.AsyncClient", _Client)
 
 
 def test_http_executor_success(monkeypatch) -> None:
@@ -81,7 +81,7 @@ def test_http_executor_retries_and_fails(monkeypatch) -> None:
         async def fake_sleep(duration: float) -> None:
             calls.append(duration)
 
-        monkeypatch.setattr("jobkit.executors.http.asyncio.sleep", fake_sleep)
+        monkeypatch.setattr("pyjobkit.executors.http.asyncio.sleep", fake_sleep)
         ctx = _Ctx()
         executor = HttpExecutor()
         result = await executor.run(

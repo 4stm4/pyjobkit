@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 from uuid import uuid4
 
-from jobkit.contracts import LogRecord
-from jobkit.events.local import LocalEventBus
-from jobkit.logging.memory import MemoryLogSink
+from pyjobkit.contracts import LogRecord
+from pyjobkit.events.local import LocalEventBus
+from pyjobkit.logging.memory import MemoryLogSink
 
 
 def test_local_event_bus_handles_multiple_handlers() -> None:

@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 from uuid import uuid4
 
-from jobkit.backends.memory import MemoryBackend
-from jobkit.engine import Engine
+from pyjobkit.backends.memory import MemoryBackend
+from pyjobkit.engine import Engine
 
 
 class _RecorderExecutor:
