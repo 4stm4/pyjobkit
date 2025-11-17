@@ -29,11 +29,17 @@ class Worker:
         self.lease_ttl = lease_ttl
         self.worker_id = uuid4()
         self._stop = asyncio.Event()
+        self._stopped = asyncio.Event()
         self._sem = asyncio.Semaphore(max_concurrency)
         self._tasks: set[Task[None]] = set()
 
     def request_stop(self) -> None:
         self._stop.set()
+
+    async def wait_stopped(self) -> None:
+        """Wait until the worker finishes processing current tasks."""
+
+        await self._stopped.wait()
 
     async def run(self) -> None:
         backoff = self.poll_interval
@@ -98,7 +104,7 @@ class Worker:
         finally:
             lease_task.cancel()
             with suppress(asyncio.CancelledError):
-                await lease_task
+                await asyncio.shield(lease_task)
 
     async def _extend_loop(self, job_id: UUID) -> None:
         try:

@@ -2,6 +2,15 @@
 
 from .engine import Engine
 from .worker import Worker
-from .contracts import Executor, QueueBackend, ExecContext
+from .contracts import ExecContext, Executor, QueueBackend
 
-__all__ = ["Engine", "Worker", "Executor", "QueueBackend", "ExecContext"]
+__version__ = "0.1.0"
+
+__all__ = [
+    "Engine",
+    "Worker",
+    "Executor",
+    "QueueBackend",
+    "ExecContext",
+    "__version__",
+]
