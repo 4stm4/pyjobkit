@@ -21,17 +21,22 @@ class Worker:
         batch: int = 1,
         poll_interval: float = 0.5,
         lease_ttl: int = 30,
+        queue_capacity: int | None = None,
     ) -> None:
         self.engine = engine
         self.max_concurrency = max_concurrency
         self.batch = batch
         self.poll_interval = poll_interval
         self.lease_ttl = lease_ttl
+        self.queue_capacity = queue_capacity
         self.worker_id = uuid4()
         self._stop = asyncio.Event()
         self._stopped = asyncio.Event()
         self._sem = asyncio.Semaphore(max_concurrency)
         self._tasks: set[Task[None]] = set()
+        self._active_jobs = 0
+        self._active_jobs_zero = asyncio.Event()
+        self._active_jobs_zero.set()
 
     def request_stop(self) -> None:
         self._stop.set()
@@ -63,6 +68,7 @@ class Worker:
 
                     for row in rows:
                         await self._sem.acquire()
+                        self._increment_active()
                         task = tg.create_task(self._run_row(row))
                         self._tasks.add(task)
                         task.add_done_callback(self._tasks.discard)
@@ -74,6 +80,7 @@ class Worker:
             await self._execute_row(row)
         finally:
             self._sem.release()
+            self._decrement_active()
 
     async def _execute_row(self, row: dict[str, Any]) -> None:
         job_id = UUID(row["id"]) if not isinstance(row["id"], UUID) else row["id"]
@@ -141,9 +148,33 @@ class Worker:
         if self._tasks:
             with suppress(Exception):
                 await asyncio.gather(*self._tasks, return_exceptions=True)
-        while self._sem._value < self.max_concurrency:  # type: ignore[attr-defined]
-            await asyncio.sleep(0.05)
+        await self._active_jobs_zero.wait()
+
+    async def check_health(self) -> dict[str, Any]:
+        try:
+            await self.engine.backend.check_connection()
+        except Exception as exc:
+            return {"status": "unhealthy", "reason": repr(exc)}
+
+        depth = await self.engine.backend.queue_depth()
+        overflow = self.queue_capacity is not None and depth > self.queue_capacity
+        status = "unhealthy" if overflow else "healthy"
+        return {
+            "status": status,
+            "queue_depth": depth,
+            "queue_overflow": overflow,
+        }
 
     @staticmethod
     def _jitter(value: float) -> float:
         return value * (0.8 + random.random() * 0.4)
+
+    def _increment_active(self) -> None:
+        self._active_jobs += 1
+        if self._active_jobs == 1:
+            self._active_jobs_zero.clear()
+
+    def _decrement_active(self) -> None:
+        self._active_jobs -= 1
+        if self._active_jobs == 0:
+            self._active_jobs_zero.set()

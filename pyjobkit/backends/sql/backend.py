@@ -246,6 +246,23 @@ class SQLBackend:
             await session.commit()
             return updated
 
+    async def queue_depth(self) -> int:  # type: ignore[override]
+        async with self.sessionmaker() as session:
+            result = await session.execute(
+                select(func.count()).select_from(
+                    select(JobTasks.c.id)
+                    .where(JobTasks.c.status == "queued")
+                    .where(JobTasks.c.scheduled_for <= func.now())
+                    .subquery()
+                )
+            )
+            count = result.scalar()
+            return int(count or 0)
+
+    async def check_connection(self) -> None:  # type: ignore[override]
+        async with self.engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+
     async def _finish(
         self, job_id: UUID, status: str, result: dict, *, expected_version: int | None
     ) -> None:
