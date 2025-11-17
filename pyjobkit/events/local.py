@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
+import logging
 from typing import Awaitable, Callable, DefaultDict, List
 
 from ..contracts import EventBus
@@ -19,4 +20,10 @@ class LocalEventBus(EventBus):
         self._subs[topic].append(handler)
 
     async def publish(self, topic: str, payload: dict) -> None:  # type: ignore[override]
-        await asyncio.gather(*(handler(payload) for handler in self._subs.get(topic, ())), return_exceptions=True)
+        results = await asyncio.gather(
+            *(handler(payload) for handler in self._subs.get(topic, ())),
+            return_exceptions=True,
+        )
+        for result in results:
+            if isinstance(result, Exception):
+                logging.error("Event handler failed", exc_info=result)

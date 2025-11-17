@@ -27,6 +27,15 @@ class SQLBackend:
         self.lease_ttl_s = lease_ttl_s
         self.sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
 
+    def __repr__(self) -> str:  # pragma: no cover - debugging helper
+        return (
+            "SQLBackend("
+            f"engine={self.engine.url!s}, "
+            f"prefer_pg_skip_locked={self.prefer_pg_skip_locked}, "
+            f"lease_ttl_s={self.lease_ttl_s}"
+            ")"
+        )
+
     async def enqueue(self, **kwargs):  # type: ignore[override]
         job_id = uuid4()
         now = datetime.now(UTC)
@@ -203,6 +212,7 @@ class SQLBackend:
             await session.execute(
                 update(JobTasks)
                 .where(JobTasks.c.id == str(job_id))
+                .where(JobTasks.c.status == "failed")
                 .values(
                     status="queued",
                     scheduled_for=retry_at,

@@ -38,6 +38,12 @@ class Worker:
         self._active_jobs_zero = asyncio.Event()
         self._active_jobs_zero.set()
 
+    def __repr__(self) -> str:  # pragma: no cover - debugging helper
+        return (
+            f"Worker(id={self.worker_id}, concurrency={self.max_concurrency}, "
+            f"batch={self.batch})"
+        )
+
     def request_stop(self) -> None:
         self._stop.set()
 
