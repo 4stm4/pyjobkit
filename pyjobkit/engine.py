@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import re
 from typing import Iterable
 from uuid import UUID
@@ -45,11 +46,17 @@ class Engine:
         executors: Iterable[Executor],
         log_sink: LogSink | None = None,
         event_bus: EventBus | None = None,
+        max_queue_size: int | None = None,
+        enqueue_timeout_s: float | None = None,
+        enqueue_check_interval_s: float = 0.1,
     ) -> None:
         self.backend = backend
         self.executors = {e.kind: e for e in executors}
         self.log_sink = log_sink or MemoryLogSink()
         self.event_bus = event_bus or LocalEventBus()
+        self.max_queue_size = max_queue_size
+        self.enqueue_timeout_s = enqueue_timeout_s
+        self._enqueue_check_interval_s = enqueue_check_interval_s
 
     async def enqueue(
         self,
@@ -64,6 +71,7 @@ class Engine:
     ) -> UUID:
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", kind):
             raise ValueError("kind must contain only alphanumerics, dash, underscore, or dot")
+        await self._wait_for_capacity()
         return await self.backend.enqueue(
             kind=kind,
             payload=payload,
@@ -85,3 +93,27 @@ class Engine:
 
     def make_ctx(self, job_id: UUID) -> ExecContext:
         return _Ctx(job_id, self.log_sink, self.event_bus, self.backend)
+
+    async def _wait_for_capacity(self) -> None:
+        if self.max_queue_size is None:
+            return
+
+        deadline = (
+            datetime.now(timezone.utc) + timedelta(seconds=self.enqueue_timeout_s)
+            if self.enqueue_timeout_s is not None
+            else None
+        )
+
+        while True:
+            depth = await self.backend.queue_depth()
+            if depth < self.max_queue_size:
+                return
+            if deadline and datetime.now(timezone.utc) >= deadline:
+                raise TimeoutError("enqueue timed out waiting for queue capacity")
+            await asyncio.sleep(self._enqueue_check_interval_s)
+
+    def __repr__(self) -> str:
+        return (
+            f"Engine(max_queue_size={self.max_queue_size}, "
+            f"enqueue_timeout_s={self.enqueue_timeout_s}, executors={list(self.executors)})"
+        )

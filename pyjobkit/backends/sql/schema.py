@@ -8,6 +8,7 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
+    Index,
     Integer,
     MetaData,
     String,
@@ -57,6 +58,19 @@ JobTasks = Table(
         "status IN ('queued','running','success','failed','cancelled','timeout')",
         name="job_status_chk",
     ),
+)
+
+Index(
+    "idx_jobs_status_scheduled",
+    JobTasks.c.status,
+    JobTasks.c.scheduled_for,
+    JobTasks.c.priority,
+)
+
+Index(
+    "idx_jobs_leased",
+    JobTasks.c.lease_until,
+    JobTasks.c.leased_by,
 )
 
 __all__ = ["JobTasks", "metadata"]
