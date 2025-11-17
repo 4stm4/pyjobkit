@@ -169,6 +169,44 @@ class SQLBackend:
     async def timeout(self, job_id: UUID) -> None:  # type: ignore[override]
         await self._finish(job_id, "timeout", {"error": "timeout"})
 
+    async def retry(self, job_id: UUID, *, delay: float) -> None:  # type: ignore[override]
+        retry_at = datetime.now(UTC) + timedelta(seconds=delay)
+        async with self.sessionmaker() as session:
+            await session.execute(
+                update(JobTasks)
+                .where(JobTasks.c.id == str(job_id))
+                .values(
+                    status="queued",
+                    scheduled_for=retry_at,
+                    lease_until=None,
+                    leased_by=None,
+                    version=JobTasks.c.version + 1,
+                )
+            )
+            await session.commit()
+
+    async def reap_expired(self) -> int:  # type: ignore[override]
+        now = datetime.now(UTC)
+        async with self.sessionmaker() as session:
+            res = await session.execute(
+                update(JobTasks)
+                .where(JobTasks.c.leased_by.is_not(None))
+                .where(JobTasks.c.lease_until.is_not(None))
+                .where(JobTasks.c.lease_until <= now)
+                .where(JobTasks.c.status.in_(["queued", "running"]))
+                .values(
+                    status="failed",
+                    finished_at=now,
+                    result={"error": "lease_expired"},
+                    lease_until=None,
+                    leased_by=None,
+                    version=JobTasks.c.version + 1,
+                )
+                .returning(JobTasks.c.id)
+            )
+            await session.commit()
+            return len(res.fetchall())
+
     async def _finish(self, job_id: UUID, status: str, result: dict) -> None:
         async with self.sessionmaker() as session:
             await session.execute(
