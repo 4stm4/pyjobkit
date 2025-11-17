@@ -63,6 +63,15 @@ class SQLBackend:
             )
             await session.commit()
 
+    async def is_cancelled(self, job_id: UUID) -> bool:  # type: ignore[override]
+        async with self.sessionmaker() as session:
+            row = (
+                await session.execute(
+                    select(JobTasks.c.cancel_requested).where(JobTasks.c.id == str(job_id))
+                )
+            ).first()
+            return bool(row and row.cancel_requested)
+
     async def claim_batch(self, worker_id: UUID, *, limit: int = 1) -> List[dict]:  # type: ignore[override]
         if self.engine.dialect.name == "postgresql" and self.prefer_pg_skip_locked:
             rows = await self._claim_pg(worker_id, limit)
@@ -150,24 +159,43 @@ class SQLBackend:
             )
             await session.commit()
 
-    async def extend_lease(self, job_id: UUID, worker_id: UUID, ttl_s: int) -> None:  # type: ignore[override]
+    async def extend_lease(
+        self,
+        job_id: UUID,
+        worker_id: UUID,
+        ttl_s: int,
+        *,
+        expected_version: int | None = None,
+    ) -> None:  # type: ignore[override]
         async with self.sessionmaker() as session:
-            await session.execute(
+            stmt = (
                 update(JobTasks)
                 .where(JobTasks.c.id == str(job_id))
                 .where(JobTasks.c.leased_by == str(worker_id))
-                .values(lease_until=datetime.now(UTC) + timedelta(seconds=ttl_s))
+            )
+            if expected_version is not None:
+                stmt = stmt.where(JobTasks.c.version == expected_version)
+            await session.execute(
+                stmt.values(lease_until=datetime.now(UTC) + timedelta(seconds=ttl_s))
             )
             await session.commit()
 
-    async def succeed(self, job_id: UUID, result: dict) -> None:  # type: ignore[override]
-        await self._finish(job_id, "success", result)
+    async def succeed(
+        self, job_id: UUID, result: dict, *, expected_version: int | None = None
+    ) -> None:  # type: ignore[override]
+        await self._finish(job_id, "success", result, expected_version=expected_version)
 
-    async def fail(self, job_id: UUID, reason: dict) -> None:  # type: ignore[override]
-        await self._finish(job_id, "failed", reason)
+    async def fail(
+        self, job_id: UUID, reason: dict, *, expected_version: int | None = None
+    ) -> None:  # type: ignore[override]
+        await self._finish(job_id, "failed", reason, expected_version=expected_version)
 
-    async def timeout(self, job_id: UUID) -> None:  # type: ignore[override]
-        await self._finish(job_id, "timeout", {"error": "timeout"})
+    async def timeout(
+        self, job_id: UUID, *, expected_version: int | None = None
+    ) -> None:  # type: ignore[override]
+        await self._finish(
+            job_id, "timeout", {"error": "timeout"}, expected_version=expected_version
+        )
 
     async def retry(self, job_id: UUID, *, delay: float) -> None:  # type: ignore[override]
         retry_at = datetime.now(UTC) + timedelta(seconds=delay)
@@ -188,36 +216,51 @@ class SQLBackend:
     async def reap_expired(self) -> int:  # type: ignore[override]
         now = datetime.now(UTC)
         async with self.sessionmaker() as session:
-            res = await session.execute(
-                update(JobTasks)
-                .where(JobTasks.c.leased_by.is_not(None))
-                .where(JobTasks.c.lease_until.is_not(None))
-                .where(JobTasks.c.lease_until <= now)
-                .where(JobTasks.c.status.in_(["queued", "running"]))
-                .values(
-                    status="failed",
-                    finished_at=now,
-                    result={"error": "lease_expired"},
-                    lease_until=None,
-                    leased_by=None,
-                    version=JobTasks.c.version + 1,
+            expired_rows = (
+                await session.execute(
+                    select(JobTasks.c.id, JobTasks.c.version)
+                    .where(JobTasks.c.leased_by.is_not(None))
+                    .where(JobTasks.c.lease_until.is_not(None))
+                    .where(JobTasks.c.lease_until <= now)
+                    .where(JobTasks.c.status.in_(["queued", "running"]))
                 )
-                .returning(JobTasks.c.id)
-            )
-            await session.commit()
-            return len(res.fetchall())
+            ).mappings().all()
 
-    async def _finish(self, job_id: UUID, status: str, result: dict) -> None:
+            updated = 0
+            for row in expired_rows:
+                stmt = (
+                    update(JobTasks)
+                    .where(JobTasks.c.id == row["id"])
+                    .where(JobTasks.c.version == row["version"])
+                    .values(
+                        status="failed",
+                        finished_at=now,
+                        result={"error": "lease_expired"},
+                        lease_until=None,
+                        leased_by=None,
+                        version=JobTasks.c.version + 1,
+                    )
+                )
+                res = await session.execute(stmt)
+                updated += res.rowcount
+            await session.commit()
+            return updated
+
+    async def _finish(
+        self, job_id: UUID, status: str, result: dict, *, expected_version: int | None
+    ) -> None:
         async with self.sessionmaker() as session:
+            stmt = update(JobTasks).where(JobTasks.c.id == str(job_id))
+            if expected_version is not None:
+                stmt = stmt.where(JobTasks.c.version == expected_version)
             await session.execute(
-                update(JobTasks)
-                .where(JobTasks.c.id == str(job_id))
-                .values(
+                stmt.values(
                     status=status,
                     finished_at=datetime.now(UTC),
                     result=result,
                     lease_until=None,
                     leased_by=None,
+                    version=JobTasks.c.version + 1,
                 )
             )
             await session.commit()

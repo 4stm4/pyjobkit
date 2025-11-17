@@ -20,12 +20,13 @@ class _Ctx(ExecContext):  # type: ignore[misc]
     job_id: UUID
     log_sink: LogSink
     event_bus: EventBus
+    backend: QueueBackend
 
     async def log(self, message: str, /, *, stream: str = "stdout") -> None:  # type: ignore[override]
         await self.log_sink.write(LogRecord(self.job_id, stream, message))
 
     async def is_cancelled(self) -> bool:  # type: ignore[override]
-        return False  # TODO: expose cancellation from backend
+        return await self.backend.is_cancelled(self.job_id)
 
     async def set_progress(self, value: float, /, **meta):  # type: ignore[override]
         await self.event_bus.publish(
@@ -83,4 +84,4 @@ class Engine:
         return self.executors.get(kind)
 
     def make_ctx(self, job_id: UUID) -> ExecContext:
-        return _Ctx(job_id, self.log_sink, self.event_bus)
+        return _Ctx(job_id, self.log_sink, self.event_bus, self.backend)
