@@ -28,6 +28,9 @@ async def _run_worker(args: argparse.Namespace) -> None:
         module_name, _, attr = dotted_path.rpartition(":")
         if not module_name:
             raise ValueError("Executor path must be in 'module:attr' format")
+        allowed_modules = {"myapp.executors", "pyjobkit.executors"}
+        if not any(module_name.startswith(m) for m in allowed_modules):
+            raise ValueError(f"Module {module_name} not in allowlist")
         module = importlib.import_module(module_name)
         executors.append(getattr(module, attr)())
     eng = Engine(backend=backend, executors=executors)

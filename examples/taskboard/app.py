@@ -65,6 +65,11 @@ async def index() -> str:
     return PAGE_HTML
 
 
+@app.get("/health")
+async def health() -> dict[str, Any]:
+    return await worker.check_health()
+
+
 @app.post("/api/jobs")
 async def enqueue_job() -> dict[str, Any]:
     duration = round(random.uniform(1.0, 5.0), 2)

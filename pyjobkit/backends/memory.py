@@ -172,6 +172,13 @@ class MemoryBackend(QueueBackend):
                 job.version += 1
             return len(expired)
 
+    async def queue_depth(self) -> int:  # type: ignore[override]
+        async with self._lock:
+            return sum(1 for job in self._jobs.values() if job.status == "queued")
+
+    async def check_connection(self) -> None:  # type: ignore[override]
+        return None
+
     async def _finish(
         self, job_id: UUID, status: str, result: dict, *, expected_version: int | None
     ) -> None:

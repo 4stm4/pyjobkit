@@ -85,6 +85,10 @@ class QueueBackend(Protocol):
 
     async def reap_expired(self) -> int: ...
 
+    async def queue_depth(self) -> int: ...
+
+    async def check_connection(self) -> None: ...
+
 
 @dataclass(slots=True)
 class LogRecord:
