@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 from asyncio import Task
 from contextlib import suppress
@@ -10,6 +11,8 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from .engine import Engine
+
+logger = logging.getLogger(__name__)
 
 
 class Worker:
@@ -63,7 +66,13 @@ class Worker:
                             self.worker_id, limit=self.batch
                         )
                         backoff = self.poll_interval
-                    except Exception:
+                    except Exception as exc:
+                        logger.warning(
+                            "claim_batch failed, backing off for %.2fs: %s",
+                            backoff,
+                            exc,
+                            exc_info=True,
+                        )
                         await asyncio.sleep(self._jitter(backoff))
                         backoff = min(backoff * 2, 30)
                         continue
@@ -78,6 +87,9 @@ class Worker:
                         task = tg.create_task(self._run_row(row))
                         self._tasks.add(task)
                         task.add_done_callback(self._tasks.discard)
+        except asyncio.CancelledError:
+            self._stop.set()
+            raise
         finally:
             await asyncio.wait_for(self._drain(), timeout=60)
 
@@ -140,10 +152,13 @@ class Worker:
 
     async def _reap_loop(self) -> None:
         try:
-            while not self._stop.is_set():
-                await asyncio.sleep(self.lease_ttl)
-                with suppress(Exception):
-                    await self.engine.backend.reap_expired()
+            while True:
+                try:
+                    await asyncio.wait_for(self._stop.wait(), timeout=self.lease_ttl)
+                    return
+                except asyncio.TimeoutError:
+                    with suppress(Exception):
+                        await self.engine.backend.reap_expired()
         except asyncio.CancelledError:
             return
 
@@ -154,7 +169,10 @@ class Worker:
         if self._tasks:
             with suppress(Exception):
                 await asyncio.gather(*self._tasks, return_exceptions=True)
-        await self._active_jobs_zero.wait()
+        try:
+            await self._active_jobs_zero.wait()
+        finally:
+            self._stopped.set()
 
     async def check_health(self) -> dict[str, Any]:
         try:

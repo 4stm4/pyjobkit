@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from uuid import UUID, uuid4
 
 import pytest
@@ -211,3 +212,48 @@ def test_worker_extend_loop_can_be_cancelled() -> None:
 def test_worker_jitter_range() -> None:
     value = Worker._jitter(10.0)
     assert 8.0 <= value <= 12.0
+
+
+def test_worker_wait_stopped_signals(monkeypatch) -> None:
+    async def _run() -> None:
+        backend = _Backend()
+        worker = Worker(_Engine(backend, []), poll_interval=0.01)
+
+        worker_task = asyncio.create_task(worker.run())
+        worker.request_stop()
+
+        await asyncio.wait_for(worker_task, timeout=1)
+        await asyncio.wait_for(worker.wait_stopped(), timeout=1)
+
+    monkeypatch.setattr("pyjobkit.worker.random.random", lambda: 0.0)
+    asyncio.run(_run())
+
+
+def test_worker_logs_claim_batch_errors(monkeypatch, caplog) -> None:
+    class _FlakyBackend(_Backend):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        async def claim_batch(self, worker_id: UUID, *, limit: int = 1) -> list[dict]:
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("db down")
+            return []
+
+    async def _run() -> None:
+        backend = _FlakyBackend()
+        worker = Worker(_Engine(backend, []), poll_interval=0.01)
+
+        caplog.set_level(logging.WARNING, logger="pyjobkit.worker")
+
+        worker_task = asyncio.create_task(worker.run())
+        await asyncio.sleep(0.05)
+        worker.request_stop()
+        await asyncio.wait_for(worker_task, timeout=1)
+
+    monkeypatch.setattr("pyjobkit.worker.random.random", lambda: 0.0)
+    asyncio.run(_run())
+
+    warnings = [rec for rec in caplog.records if rec.levelno == logging.WARNING]
+    assert any("claim_batch failed" in rec.getMessage() for rec in warnings)
