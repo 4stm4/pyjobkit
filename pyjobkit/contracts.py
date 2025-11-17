@@ -56,6 +56,10 @@ class QueueBackend(Protocol):
 
     async def timeout(self, job_id: UUID) -> None: ...
 
+    async def retry(self, job_id: UUID, *, delay: float) -> None: ...
+
+    async def reap_expired(self) -> int: ...
+
 
 @dataclass(slots=True)
 class LogRecord:

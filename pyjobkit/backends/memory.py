@@ -121,6 +121,34 @@ class MemoryBackend(QueueBackend):
     async def timeout(self, job_id: UUID) -> None:  # type: ignore[override]
         await self._finish(job_id, "timeout", {"error": "timeout"})
 
+    async def retry(self, job_id: UUID, *, delay: float) -> None:  # type: ignore[override]
+        async with self._lock:
+            job = self._jobs[job_id]
+            job.status = "queued"
+            job.scheduled_for = datetime.now(UTC) + timedelta(seconds=delay)
+            job.lease_until = None
+            job.leased_by = None
+            job.version += 1
+
+    async def reap_expired(self) -> int:  # type: ignore[override]
+        async with self._lock:
+            now = datetime.now(UTC)
+            expired = [
+                job
+                for job in self._jobs.values()
+                if job.leased_by is not None
+                and job.lease_until is not None
+                and job.lease_until <= now
+                and job.status in {"queued", "running"}
+            ]
+            for job in expired:
+                job.status = "failed"
+                job.finished_at = now
+                job.result = {"error": "lease_expired"}
+                job.lease_until = None
+                job.leased_by = None
+            return len(expired)
+
     async def _finish(self, job_id: UUID, status: str, result: dict) -> None:
         async with self._lock:
             job = self._jobs[job_id]

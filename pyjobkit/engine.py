@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import re
 from typing import Iterable
 from uuid import UUID
 
@@ -58,6 +59,8 @@ class Engine:
         idempotency_key: str | None = None,
         timeout_s: int | None = None,
     ) -> UUID:
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", kind):
+            raise ValueError("kind must contain only alphanumerics, dash, underscore, or dot")
         return await self.backend.enqueue(
             kind=kind,
             payload=payload,
