@@ -39,9 +39,10 @@ class _Backend:
     def __init__(self) -> None:
         self.rows: list[list[dict]] = []
         self.marked: list[UUID] = []
-        self.succeeded: list[tuple[UUID, dict]] = []
-        self.failed: list[tuple[UUID, dict]] = []
-        self.timed_out: list[UUID] = []
+        self.succeeded: list[tuple[UUID, dict, int | None]] = []
+        self.failed: list[tuple[UUID, dict, int | None]] = []
+        self.timed_out: list[tuple[UUID, int | None]] = []
+        self.retried: list[tuple[UUID, float]] = []
         self.extended: list[UUID] = []
 
     async def claim_batch(self, worker_id: UUID, *, limit: int = 1) -> list[dict]:
@@ -50,17 +51,31 @@ class _Backend:
     async def mark_running(self, job_id: UUID, worker_id: UUID) -> None:
         self.marked.append(job_id)
 
-    async def extend_lease(self, job_id: UUID, worker_id: UUID, ttl_s: int) -> None:
-        self.extended.append(job_id)
+    async def extend_lease(
+        self,
+        job_id: UUID,
+        worker_id: UUID,
+        ttl_s: int,
+        *,
+        expected_version: int | None = None,
+    ) -> None:
+        self.extended.append((job_id, expected_version))
 
-    async def succeed(self, job_id: UUID, result: dict) -> None:
-        self.succeeded.append((job_id, result))
+    async def succeed(
+        self, job_id: UUID, result: dict, *, expected_version: int | None = None
+    ) -> None:
+        self.succeeded.append((job_id, result, expected_version))
 
-    async def fail(self, job_id: UUID, reason: dict) -> None:
-        self.failed.append((job_id, reason))
+    async def fail(
+        self, job_id: UUID, reason: dict, *, expected_version: int | None = None
+    ) -> None:
+        self.failed.append((job_id, reason, expected_version))
 
-    async def timeout(self, job_id: UUID) -> None:
-        self.timed_out.append(job_id)
+    async def timeout(self, job_id: UUID, *, expected_version: int | None = None) -> None:
+        self.timed_out.append((job_id, expected_version))
+
+    async def retry(self, job_id: UUID, *, delay: float) -> None:
+        self.retried.append((job_id, delay))
 
 
 class _Engine:
@@ -95,7 +110,7 @@ def test_worker_run_processes_rows(monkeypatch) -> None:
         backend.rows = [[], [{"id": str(job_id), "kind": "demo", "payload": {}}]]
 
         await asyncio.wait_for(worker.run(), timeout=1)
-        assert backend.succeeded == [(job_id, {"ok": True})]
+        assert backend.succeeded == [(job_id, {"ok": True}, None)]
         assert backend.extended  # lease loop kicked in
 
     monkeypatch.setattr("pyjobkit.worker.random.random", lambda: 0.0)
@@ -108,7 +123,9 @@ def test_worker_execute_unknown_executor() -> None:
         worker = Worker(_Engine(backend, []))
         job_id = uuid4()
         await worker._execute_row({"id": job_id, "kind": "nope", "payload": {}})
-        assert backend.failed == [(job_id, {"error": "unknown_kind", "kind": "nope"})]
+        assert backend.failed == [
+            (job_id, {"error": "unknown_kind", "kind": "nope"}, None)
+        ]
 
     asyncio.run(_run())
 
@@ -154,7 +171,9 @@ def test_worker_execute_generic_exception() -> None:
 
         executor = _Executor(kind="boom", behavior=boom)
         worker = Worker(_Engine(backend, [executor]))
-        await worker._execute_row({"id": uuid4(), "kind": "boom", "payload": {}})
+        await worker._execute_row(
+            {"id": uuid4(), "kind": "boom", "payload": {}, "attempts": 2, "max_attempts": 2}
+        )
         assert backend.failed[-1][1]["error"].startswith("RuntimeError")
 
     asyncio.run(_run())
@@ -181,7 +200,7 @@ def test_worker_extend_loop_can_be_cancelled() -> None:
     async def _run() -> None:
         backend = _Backend()
         worker = Worker(_Engine(backend, []), lease_ttl=0.01)
-        task = asyncio.create_task(worker._extend_loop(uuid4()))
+        task = asyncio.create_task(worker._extend_loop(uuid4(), None))
         await asyncio.sleep(0.03)
         task.cancel()
         await task

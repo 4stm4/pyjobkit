@@ -66,7 +66,6 @@ class Worker:
                         task = tg.create_task(self._run_row(row))
                         self._tasks.add(task)
                         task.add_done_callback(self._tasks.discard)
-                tg.cancel_scope.cancel()
         finally:
             await asyncio.wait_for(self._drain(), timeout=60)
 
@@ -83,22 +82,29 @@ class Worker:
             await self.engine.backend.fail(job_id, {"error": "unknown_kind", "kind": row["kind"]})
             return
         ctx = self.engine.make_ctx(job_id)
-        lease_task = asyncio.create_task(self._extend_loop(job_id))
+        expected_version = row.get("version")
+        lease_task = asyncio.create_task(self._extend_loop(job_id, expected_version))
         try:
             await self.engine.backend.mark_running(job_id, self.worker_id)
             timeout = row.get("timeout_s") or 300
             async with asyncio.timeout(timeout):
                 result = await executor.run(job_id=job_id, payload=row["payload"], ctx=ctx)
-            await self.engine.backend.succeed(job_id, result)
+            await self.engine.backend.succeed(
+                job_id, result, expected_version=expected_version
+            )
         except asyncio.TimeoutError:
-            await self.engine.backend.timeout(job_id)
+            await self.engine.backend.timeout(job_id, expected_version=expected_version)
         except asyncio.CancelledError:
-            await self.engine.backend.fail(job_id, {"error": "cancelled"})
+            await self.engine.backend.fail(
+                job_id, {"error": "cancelled"}, expected_version=expected_version
+            )
             raise
         except Exception as exc:  # pragma: no cover - defensive
             attempts = (row.get("attempts") or 0) + 1
             if attempts >= row.get("max_attempts", 3):
-                await self.engine.backend.fail(job_id, {"error": repr(exc)})
+                await self.engine.backend.fail(
+                    job_id, {"error": repr(exc)}, expected_version=expected_version
+                )
             else:
                 await self.engine.backend.retry(job_id, delay=2**(attempts - 1))
         finally:
@@ -106,11 +112,16 @@ class Worker:
             with suppress(asyncio.CancelledError):
                 await asyncio.shield(lease_task)
 
-    async def _extend_loop(self, job_id: UUID) -> None:
+    async def _extend_loop(self, job_id: UUID, expected_version: int | None) -> None:
         try:
             while True:
                 await asyncio.sleep(self.lease_ttl * 0.5)
-                await self.engine.backend.extend_lease(job_id, self.worker_id, self.lease_ttl)
+                await self.engine.backend.extend_lease(
+                    job_id,
+                    self.worker_id,
+                    self.lease_ttl,
+                    expected_version=expected_version,
+                )
         except asyncio.CancelledError:
             return
 

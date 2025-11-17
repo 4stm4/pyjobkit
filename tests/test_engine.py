@@ -51,7 +51,7 @@ async def _exercise_engine() -> None:
 
     await ctx.set_progress(0.75, note="almost")
     assert progress_events == [{"value": 0.75, "note": "almost"}]
-    assert await ctx.is_cancelled() is False
+    assert await ctx.is_cancelled() is True
 
     result = await executor.run(job_id=job_id, payload={"value": 42}, ctx=ctx)
     assert result["echo"] == {"value": 42}

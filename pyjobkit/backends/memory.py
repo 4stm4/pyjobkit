@@ -78,6 +78,11 @@ class MemoryBackend(QueueBackend):
             if job:
                 job.cancel_requested = True
 
+    async def is_cancelled(self, job_id: UUID) -> bool:  # type: ignore[override]
+        async with self._lock:
+            job = self._jobs.get(job_id)
+            return bool(job and job.cancel_requested)
+
     async def claim_batch(self, worker_id: UUID, *, limit: int = 1) -> List[dict]:  # type: ignore[override]
         async with self._lock:
             now = datetime.now(UTC)
@@ -106,20 +111,37 @@ class MemoryBackend(QueueBackend):
             job.started_at = datetime.now(UTC)
             job.attempts += 1
 
-    async def extend_lease(self, job_id: UUID, worker_id: UUID, ttl_s: int) -> None:  # type: ignore[override]
+    async def extend_lease(
+        self,
+        job_id: UUID,
+        worker_id: UUID,
+        ttl_s: int,
+        *,
+        expected_version: int | None = None,
+    ) -> None:  # type: ignore[override]
         async with self._lock:
             job = self._jobs[job_id]
-            if job.leased_by == worker_id:
+            if job.leased_by == worker_id and (
+                expected_version is None or job.version == expected_version
+            ):
                 job.lease_until = datetime.now(UTC) + timedelta(seconds=ttl_s)
 
-    async def succeed(self, job_id: UUID, result: dict) -> None:  # type: ignore[override]
-        await self._finish(job_id, "success", result)
+    async def succeed(
+        self, job_id: UUID, result: dict, *, expected_version: int | None = None
+    ) -> None:  # type: ignore[override]
+        await self._finish(job_id, "success", result, expected_version=expected_version)
 
-    async def fail(self, job_id: UUID, reason: dict) -> None:  # type: ignore[override]
-        await self._finish(job_id, "failed", reason)
+    async def fail(
+        self, job_id: UUID, reason: dict, *, expected_version: int | None = None
+    ) -> None:  # type: ignore[override]
+        await self._finish(job_id, "failed", reason, expected_version=expected_version)
 
-    async def timeout(self, job_id: UUID) -> None:  # type: ignore[override]
-        await self._finish(job_id, "timeout", {"error": "timeout"})
+    async def timeout(
+        self, job_id: UUID, *, expected_version: int | None = None
+    ) -> None:  # type: ignore[override]
+        await self._finish(
+            job_id, "timeout", {"error": "timeout"}, expected_version=expected_version
+        )
 
     async def retry(self, job_id: UUID, *, delay: float) -> None:  # type: ignore[override]
         async with self._lock:
@@ -147,16 +169,22 @@ class MemoryBackend(QueueBackend):
                 job.result = {"error": "lease_expired"}
                 job.lease_until = None
                 job.leased_by = None
+                job.version += 1
             return len(expired)
 
-    async def _finish(self, job_id: UUID, status: str, result: dict) -> None:
+    async def _finish(
+        self, job_id: UUID, status: str, result: dict, *, expected_version: int | None
+    ) -> None:
         async with self._lock:
             job = self._jobs[job_id]
+            if expected_version is not None and job.version != expected_version:
+                return
             job.status = status
             job.finished_at = datetime.now(UTC)
             job.result = result
             job.lease_until = None
             job.leased_by = None
+            job.version += 1
 
     @staticmethod
     def _job_to_dict(job: _Job) -> dict:
