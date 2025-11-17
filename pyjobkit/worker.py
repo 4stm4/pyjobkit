@@ -28,22 +28,31 @@ class Worker:
         self.lease_ttl = lease_ttl
         self.worker_id = uuid4()
         self._stop = asyncio.Event()
+        self._stopped = asyncio.Event()
         self._sem = asyncio.Semaphore(max_concurrency)
 
     def request_stop(self) -> None:
         self._stop.set()
 
-    async def run(self) -> None:
-        while not self._stop.is_set():
-            rows = await self.engine.backend.claim_batch(self.worker_id, limit=self.batch)
-            if not rows:
-                await asyncio.sleep(self._jitter(self.poll_interval))
-                continue
+    async def wait_stopped(self) -> None:
+        """Wait until the worker finishes processing current tasks."""
 
-            async with asyncio.TaskGroup() as tg:
-                for row in rows:
-                    await self._sem.acquire()
-                    tg.create_task(self._run_row(row))
+        await self._stopped.wait()
+
+    async def run(self) -> None:
+        try:
+            while not self._stop.is_set():
+                rows = await self.engine.backend.claim_batch(self.worker_id, limit=self.batch)
+                if not rows:
+                    await asyncio.sleep(self._jitter(self.poll_interval))
+                    continue
+
+                async with asyncio.TaskGroup() as tg:
+                    for row in rows:
+                        await self._sem.acquire()
+                        tg.create_task(self._run_row(row))
+        finally:
+            self._stopped.set()
 
     async def _run_row(self, row: dict[str, Any]) -> None:
         try:
@@ -75,7 +84,7 @@ class Worker:
         finally:
             lease_task.cancel()
             with suppress(asyncio.CancelledError):
-                await lease_task
+                await asyncio.shield(lease_task)
 
     async def _extend_loop(self, job_id: UUID) -> None:
         try:

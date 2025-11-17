@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib
+import logging
 
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -14,13 +16,21 @@ from .worker import Worker
 
 
 async def _run_worker(args: argparse.Namespace) -> None:
+    logging.basicConfig(level=logging.INFO)
     engine = create_async_engine(args.dsn)
     backend = SQLBackend(
         engine,
         prefer_pg_skip_locked=not args.disable_skip_locked,
         lease_ttl_s=args.lease_ttl,
     )
-    eng = Engine(backend=backend, executors=[SubprocessExecutor(), HttpExecutor()])
+    executors = [SubprocessExecutor(), HttpExecutor()]
+    for dotted_path in getattr(args, "executor", None) or []:
+        module_name, _, attr = dotted_path.rpartition(":")
+        if not module_name:
+            raise ValueError("Executor path must be in 'module:attr' format")
+        module = importlib.import_module(module_name)
+        executors.append(getattr(module, attr)())
+    eng = Engine(backend=backend, executors=executors)
     worker = Worker(
         eng,
         max_concurrency=args.concurrency,
@@ -42,6 +52,11 @@ def main() -> None:
         "--disable-skip-locked",
         action="store_true",
         help="Disable Postgres SKIP LOCKED optimization",
+    )
+    parser.add_argument(
+        "--executor",
+        action="append",
+        help="Additional executor in the form 'module:attr' to register with the worker",
     )
     args = parser.parse_args()
     try:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Any, Protocol, TypedDict
 from uuid import UUID
 
 
@@ -29,6 +29,23 @@ class Executor(Protocol):
 class QueueBackend(Protocol):
     """Interface for queue backends."""
 
+    class ClaimedJob(TypedDict):
+        """Claimed job payload returned by :meth:`claim_batch`.
+
+        Attributes:
+            id: Unique job identifier.
+            kind: Executor kind requested by the job author.
+            payload: Job payload passed through to the executor.
+            timeout_s: Optional timeout for the job run in seconds.
+            lease_until: Backend-specific timestamp for the current lease.
+        """
+
+        id: UUID | str
+        kind: str
+        payload: dict
+        timeout_s: int | None
+        lease_until: datetime | None
+
     async def enqueue(
         self,
         *,
@@ -44,7 +61,7 @@ class QueueBackend(Protocol):
 
     async def cancel(self, job_id: UUID) -> None: ...
 
-    async def claim_batch(self, worker_id: UUID, *, limit: int = 1) -> list[dict]: ...
+    async def claim_batch(self, worker_id: UUID, *, limit: int = 1) -> list[ClaimedJob]: ...
 
     async def mark_running(self, job_id: UUID, worker_id: UUID) -> None: ...
 
