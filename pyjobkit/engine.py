@@ -11,6 +11,8 @@ from .contracts import EventBus, ExecContext, Executor, LogRecord, LogSink, Queu
 from .events.local import LocalEventBus
 from .logging.memory import MemoryLogSink
 
+PROGRESS_TOPIC_TEMPLATE = "job.{job_id}.progress"
+
 
 @dataclass(slots=True)
 class _Ctx(ExecContext):  # type: ignore[misc]
@@ -26,7 +28,7 @@ class _Ctx(ExecContext):  # type: ignore[misc]
 
     async def set_progress(self, value: float, /, **meta):  # type: ignore[override]
         await self.event_bus.publish(
-            f"job.{self.job_id}.progress",
+            PROGRESS_TOPIC_TEMPLATE.format(job_id=self.job_id),
             {"value": value, **meta},
         )
 
