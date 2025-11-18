@@ -13,7 +13,9 @@ from pyjobkit.executors.http import HttpExecutor
 from pyjobkit.executors.subprocess import SubprocessExecutor
 
 
-class _Ctx:
+class TestContext:
+    __test__ = False
+
     def __init__(self) -> None:
         self.logs: list[tuple[str, str]] = []
 
@@ -62,7 +64,7 @@ def test_http_executor_success(monkeypatch) -> None:
     async def _run() -> None:
         resp = _Response(200, {"content-type": "application/json"}, "{}", {"ok": True})
         _patch_http_client(monkeypatch, [resp])
-        ctx = _Ctx()
+        ctx = TestContext()
         executor = HttpExecutor()
         result = await executor.run(job_id=uuid4(), payload={"url": "https://example"}, ctx=ctx)
         assert result["status"] == 200
@@ -82,7 +84,7 @@ def test_http_executor_retries_and_fails(monkeypatch) -> None:
             calls.append(duration)
 
         monkeypatch.setattr("pyjobkit.executors.http.asyncio.sleep", fake_sleep)
-        ctx = _Ctx()
+        ctx = TestContext()
         executor = HttpExecutor()
         result = await executor.run(
             job_id=uuid4(),
@@ -102,7 +104,7 @@ def test_http_executor_retries_and_fails(monkeypatch) -> None:
 
 def test_subprocess_executor_exec_and_shell() -> None:
     async def _run() -> None:
-        ctx = _Ctx()
+        ctx = TestContext()
         executor = SubprocessExecutor()
         result = await executor.run(
             job_id=uuid4(),
@@ -112,7 +114,7 @@ def test_subprocess_executor_exec_and_shell() -> None:
         assert result["returncode"] == 0
         assert any(stream == "stderr" for stream, _ in ctx.logs)
 
-        ctx_shell = _Ctx()
+        ctx_shell = TestContext()
         result_shell = await executor.run(
             job_id=uuid4(),
             payload={"cmd": "python3 -c \"print('shell')\""},

@@ -15,6 +15,7 @@ from .events.local import LocalEventBus
 from .logging.memory import MemoryLogSink
 
 PROGRESS_TOPIC_TEMPLATE = "job.{job_id}.progress"
+KIND_PATTERN = re.compile(r"[A-Za-z0-9_.-]+")
 logger = logging.getLogger(__name__)
 
 
@@ -87,7 +88,13 @@ class Engine:
         idempotency_key: str | None = None,
         timeout_s: int | None = None,
     ) -> UUID:
-        if not re.fullmatch(r"[A-Za-z0-9_.-]+", kind):
+        """Enqueue a job for processing and return its identifier.
+
+        The method's primary effect is placing the job into the backend queue; the
+        returned UUID allows callers to track execution progress later.
+        """
+
+        if not KIND_PATTERN.fullmatch(kind):
             raise ValueError("kind must contain only alphanumerics, dash, underscore, or dot")
         logger.info(
             "enqueue requested: kind=%s priority=%s scheduled_for=%s timeout_s=%s idempotency_key=%s",
