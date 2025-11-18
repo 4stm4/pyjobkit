@@ -69,7 +69,9 @@ class Engine:
         exec_context_factory: ExecContextFactory | None = None,
     ) -> None:
         self.backend = backend
-        self.executors = self._build_executor_map(executors)
+        self.executors: dict[str, Executor] = {}
+        for executor in executors:
+            self.register_executor(executor)
         self.log_sink = log_sink or MemoryLogSink()
         self.event_bus = event_bus or LocalEventBus()
         self.max_queue_size = max_queue_size
@@ -126,6 +128,22 @@ class Engine:
 
     def executor_for(self, kind: str) -> Executor | None:
         return self.executors.get(kind)
+
+    def register_executor(self, executor: Executor) -> None:
+        """Register a new executor at runtime.
+
+        Raises:
+            ValueError: If an executor with the same ``kind`` is already registered
+                or the kind contains invalid characters.
+        """
+
+        if not KIND_PATTERN.fullmatch(executor.kind):
+            raise ValueError(
+                "executor kind must contain only alphanumerics, dash, underscore, or dot"
+            )
+        if executor.kind in self.executors:
+            raise ValueError(f"duplicate executor kind registered: {executor.kind}")
+        self.executors[executor.kind] = executor
 
     def make_ctx(self, job_id: UUID) -> ExecContext:
         return self._exec_context_factory(
@@ -239,11 +257,3 @@ class Engine:
             f"enqueue_timeout_s={self.enqueue_timeout_s}, executors={list(self.executors)})"
         )
 
-    @staticmethod
-    def _build_executor_map(executors: Iterable[Executor]) -> dict[str, Executor]:
-        mapping: dict[str, Executor] = {}
-        for executor in executors:
-            if executor.kind in mapping:
-                raise ValueError(f"duplicate executor kind registered: {executor.kind}")
-            mapping[executor.kind] = executor
-        return mapping
