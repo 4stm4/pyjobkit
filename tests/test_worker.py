@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import suppress
 from uuid import UUID, uuid4
 
 import pytest
@@ -273,6 +274,24 @@ def test_worker_wait_stopped_signals(monkeypatch) -> None:
         worker.request_stop()
 
         await asyncio.wait_for(worker_task, timeout=1)
+        await asyncio.wait_for(worker.wait_stopped(), timeout=1)
+
+    monkeypatch.setattr("pyjobkit.worker.random.random", lambda: 0.0)
+    asyncio.run(_run())
+
+
+def test_worker_wait_stopped_after_cancel(monkeypatch) -> None:
+    async def _run() -> None:
+        backend = _Backend()
+        worker = Worker(_Engine(backend, []), poll_interval=0.01)
+
+        worker_task = asyncio.create_task(worker.run())
+        await asyncio.sleep(0.02)
+
+        worker_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await worker_task
+
         await asyncio.wait_for(worker.wait_stopped(), timeout=1)
 
     monkeypatch.setattr("pyjobkit.worker.random.random", lambda: 0.0)
