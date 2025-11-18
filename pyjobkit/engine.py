@@ -89,8 +89,16 @@ class Engine:
     ) -> UUID:
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", kind):
             raise ValueError("kind must contain only alphanumerics, dash, underscore, or dot")
+        logger.info(
+            "enqueue requested: kind=%s priority=%s scheduled_for=%s timeout_s=%s idempotency_key=%s",
+            kind,
+            priority,
+            scheduled_for,
+            timeout_s,
+            idempotency_key,
+        )
         await self._wait_for_capacity()
-        return await self.backend.enqueue(
+        job_id = await self.backend.enqueue(
             kind=kind,
             payload=payload,
             priority=priority,
@@ -99,11 +107,14 @@ class Engine:
             idempotency_key=idempotency_key,
             timeout_s=timeout_s,
         )
+        logger.info("enqueue accepted: job_id=%s kind=%s priority=%s", job_id, kind, priority)
+        return job_id
 
     async def get(self, job_id: UUID) -> dict:
         return await self.backend.get(job_id)
 
     async def cancel(self, job_id: UUID) -> None:
+        logger.info("cancel requested: job_id=%s", job_id)
         await self.backend.cancel(job_id)
 
     def executor_for(self, kind: str) -> Executor | None:
@@ -172,16 +183,36 @@ class Engine:
 
         last_log_time = datetime.now(timezone.utc)
 
+        waited_for_capacity = False
+
         while True:
             depth = await self.queue_depth()
             if depth < self.max_queue_size:
+                if deadline is not None and waited_for_capacity:
+                    logger.info(
+                        "enqueue capacity available after waiting: depth=%s max_queue_size=%s",
+                        depth,
+                        self.max_queue_size,
+                    )
                 return
+            waited_for_capacity = True
             if deadline is None:
+                logger.error(
+                    "enqueue capacity reached without timeout: depth=%s max_queue_size=%s",
+                    depth,
+                    self.max_queue_size,
+                )
                 raise TimeoutError(
                     "queue capacity reached and enqueue_timeout_s is not set; "
                     "provide a timeout to wait for capacity or increase max_queue_size"
                 )
             if deadline and datetime.now(timezone.utc) >= deadline:
+                logger.error(
+                    "enqueue timed out waiting for queue capacity: depth=%s max_queue_size=%s timeout_s=%s",
+                    depth,
+                    self.max_queue_size,
+                    self.enqueue_timeout_s,
+                )
                 raise TimeoutError("enqueue timed out waiting for queue capacity")
 
             now = datetime.now(timezone.utc)

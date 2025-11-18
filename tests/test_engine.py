@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from uuid import uuid4
 
 import pytest
@@ -112,3 +113,42 @@ def test_engine_accepts_custom_exec_context_factory() -> None:
         assert created == [(job_id, "stdout", "custom")]
 
     asyncio.run(_run())
+
+
+def test_engine_logs_enqueue_and_cancel(caplog) -> None:
+    async def _run() -> None:
+        backend = MemoryBackend()
+        engine = Engine(backend=backend, executors=[])
+
+        caplog.set_level(logging.INFO, logger="pyjobkit.engine")
+
+        job_id = await engine.enqueue(kind="demo", payload={"value": 1})
+        await engine.cancel(job_id)
+
+    asyncio.run(_run())
+
+    messages = [record.message for record in caplog.records]
+    assert any("enqueue requested" in message for message in messages)
+    assert any("enqueue accepted" in message for message in messages)
+    assert any("cancel requested" in message for message in messages)
+
+
+def test_engine_logs_capacity_timeout(caplog) -> None:
+    async def _run() -> None:
+        backend = MemoryBackend()
+        engine = Engine(
+            backend=backend,
+            executors=[],
+            max_queue_size=0,
+            enqueue_timeout_s=0,
+        )
+
+        caplog.set_level(logging.ERROR, logger="pyjobkit.engine")
+
+        with pytest.raises(TimeoutError):
+            await engine.enqueue(kind="demo", payload={})
+
+    asyncio.run(_run())
+
+    messages = [record.message for record in caplog.records]
+    assert any("timed out waiting for queue capacity" in message for message in messages)
