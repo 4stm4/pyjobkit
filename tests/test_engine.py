@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 
 from pyjobkit.backends.memory import MemoryBackend
-from pyjobkit.engine import Engine
+from pyjobkit.engine import DefaultExecContext, Engine
 
 
 class _RecorderExecutor:
@@ -90,3 +90,25 @@ def test_engine_rejects_duplicate_executor_kinds() -> None:
     backend = MemoryBackend()
     with pytest.raises(ValueError):
         Engine(backend=backend, executors=[_Executor(), _Executor()])
+
+
+def test_engine_accepts_custom_exec_context_factory() -> None:
+    async def _run() -> None:
+        created: list[tuple] = []
+
+        class _CustomCtx(DefaultExecContext):
+            async def log(self, message: str, /, *, stream: str = "stdout") -> None:  # type: ignore[override]
+                created.append((self.job_id, stream, message))
+                await super().log(message, stream=stream)
+
+        def _factory(*args, **kwargs):
+            return _CustomCtx(*args, **kwargs)
+
+        backend = MemoryBackend()
+        engine = Engine(backend=backend, executors=[], exec_context_factory=_factory)
+        job_id = uuid4()
+        ctx = engine.make_ctx(job_id)
+        await ctx.log("custom")
+        assert created == [(job_id, "stdout", "custom")]
+
+    asyncio.run(_run())
