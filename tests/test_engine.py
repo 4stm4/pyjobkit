@@ -93,6 +93,38 @@ def test_engine_rejects_duplicate_executor_kinds() -> None:
         Engine(backend=backend, executors=[_Executor(), _Executor()])
 
 
+def test_engine_register_executor_runtime() -> None:
+    backend = MemoryBackend()
+    engine = Engine(backend=backend, executors=[])
+
+    executor = _RecorderExecutor()
+    engine.register_executor(executor)
+
+    assert engine.executor_for("demo") is executor
+
+
+def test_engine_register_executor_rejects_conflicts() -> None:
+    backend = MemoryBackend()
+    engine = Engine(backend=backend, executors=[_RecorderExecutor()])
+
+    with pytest.raises(ValueError):
+        engine.register_executor(_RecorderExecutor())
+
+
+def test_engine_register_executor_validates_kind_characters() -> None:
+    class _BadExecutor:
+        kind = "bad kind"
+
+        async def run(self, *, job_id, payload: dict, ctx):  # type: ignore[override]
+            return {}
+
+    backend = MemoryBackend()
+    engine = Engine(backend=backend, executors=[])
+
+    with pytest.raises(ValueError):
+        engine.register_executor(_BadExecutor())
+
+
 def test_engine_accepts_custom_exec_context_factory() -> None:
     async def _run() -> None:
         created: list[tuple] = []
