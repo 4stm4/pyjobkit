@@ -89,7 +89,10 @@ class Worker:
             self._stop.set()
             raise
         finally:
-            await asyncio.wait_for(self._drain(), timeout=60)
+            try:
+                await asyncio.wait_for(asyncio.shield(self._drain()), timeout=60)
+            finally:
+                self._stopped.set()
 
     async def _run_row(self, row: dict[str, Any]) -> None:
         try:
@@ -161,10 +164,7 @@ class Worker:
         if self._tasks:
             with suppress(Exception):
                 await asyncio.gather(*self._tasks, return_exceptions=True)
-        try:
-            await self._active_jobs_zero.wait()
-        finally:
-            self._stopped.set()
+        await self._active_jobs_zero.wait()
 
     async def check_health(self) -> dict[str, Any]:
         try:
