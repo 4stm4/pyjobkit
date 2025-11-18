@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from uuid import uuid4
 
+import pytest
+
 from pyjobkit.backends.memory import MemoryBackend
 from pyjobkit.engine import Engine
 
@@ -79,3 +81,12 @@ def test_engine_make_ctx_is_isolated() -> None:
         assert [entry.message for entry in logs_b] == ["b"]
 
     asyncio.run(_run())
+
+
+def test_engine_rejects_duplicate_executor_kinds() -> None:
+    class _Executor:
+        kind = "duplicate"
+
+    backend = MemoryBackend()
+    with pytest.raises(ValueError):
+        Engine(backend=backend, executors=[_Executor(), _Executor()])

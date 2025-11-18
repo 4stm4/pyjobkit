@@ -62,9 +62,7 @@ class Worker:
                 tg.create_task(self._reap_loop())
                 while not self._stop.is_set():
                     try:
-                        rows = await self.engine.backend.claim_batch(
-                            self.worker_id, limit=self.batch
-                        )
+                        rows = await self.engine.claim_batch(self.worker_id, limit=self.batch)
                         backoff = self.poll_interval
                     except Exception as exc:
                         logger.warning(
@@ -104,34 +102,28 @@ class Worker:
         job_id = UUID(row["id"]) if not isinstance(row["id"], UUID) else row["id"]
         executor = self.engine.executor_for(row["kind"])
         if executor is None:
-            await self.engine.backend.fail(job_id, {"error": "unknown_kind", "kind": row["kind"]})
+            await self.engine.fail(job_id, {"error": "unknown_kind", "kind": row["kind"]})
             return
         ctx = self.engine.make_ctx(job_id)
         expected_version = row.get("version")
         lease_task = asyncio.create_task(self._extend_loop(job_id, expected_version))
         try:
-            await self.engine.backend.mark_running(job_id, self.worker_id)
+            await self.engine.mark_running(job_id, self.worker_id)
             timeout = row.get("timeout_s") or 300
             async with asyncio.timeout(timeout):
                 result = await executor.run(job_id=job_id, payload=row["payload"], ctx=ctx)
-            await self.engine.backend.succeed(
-                job_id, result, expected_version=expected_version
-            )
+            await self.engine.succeed(job_id, result, expected_version=expected_version)
         except asyncio.TimeoutError:
-            await self.engine.backend.timeout(job_id, expected_version=expected_version)
+            await self.engine.timeout(job_id, expected_version=expected_version)
         except asyncio.CancelledError:
-            await self.engine.backend.fail(
-                job_id, {"error": "cancelled"}, expected_version=expected_version
-            )
+            await self.engine.fail(job_id, {"error": "cancelled"}, expected_version=expected_version)
             raise
         except Exception as exc:  # pragma: no cover - defensive
             attempts = (row.get("attempts") or 0) + 1
             if attempts >= row.get("max_attempts", 3):
-                await self.engine.backend.fail(
-                    job_id, {"error": repr(exc)}, expected_version=expected_version
-                )
+                await self.engine.fail(job_id, {"error": repr(exc)}, expected_version=expected_version)
             else:
-                await self.engine.backend.retry(job_id, delay=2**(attempts - 1))
+                await self.engine.retry(job_id, delay=2**(attempts - 1))
         finally:
             lease_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -141,7 +133,7 @@ class Worker:
         try:
             while True:
                 await asyncio.sleep(self.lease_ttl * 0.5)
-                await self.engine.backend.extend_lease(
+                await self.engine.extend_lease(
                     job_id,
                     self.worker_id,
                     self.lease_ttl,
@@ -158,7 +150,7 @@ class Worker:
                     return
                 except asyncio.TimeoutError:
                     with suppress(Exception):
-                        await self.engine.backend.reap_expired()
+                        await self.engine.reap_expired()
         except asyncio.CancelledError:
             return
 
@@ -176,11 +168,11 @@ class Worker:
 
     async def check_health(self) -> dict[str, Any]:
         try:
-            await self.engine.backend.check_connection()
+            await self.engine.check_connection()
         except Exception as exc:
             return {"status": "unhealthy", "reason": repr(exc)}
 
-        depth = await self.engine.backend.queue_depth()
+        depth = await self.engine.queue_depth()
         overflow = self.queue_capacity is not None and depth > self.queue_capacity
         status = "unhealthy" if overflow else "healthy"
         return {
