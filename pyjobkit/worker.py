@@ -152,8 +152,14 @@ class Worker:
                     await asyncio.wait_for(self._stop.wait(), timeout=self.lease_ttl)
                     return
                 except asyncio.TimeoutError:
-                    with suppress(Exception):
+                    try:
                         await self.engine.reap_expired()
+                    except Exception as exc:
+                        logger.warning(
+                            "reap_expired failed, continuing to retry: %s",
+                            exc,
+                            exc_info=True,
+                        )
         except asyncio.CancelledError:
             return
 
