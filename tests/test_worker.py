@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import suppress
 from uuid import UUID, uuid4
 
 import pytest
 
 from pyjobkit.worker import Worker
+from pyjobkit.executors.subprocess import SubprocessExecutor
 
 
 class _DummyCtx:
@@ -194,6 +196,42 @@ def test_worker_execute_timeout() -> None:
         worker = Worker(_Engine(backend, [executor]), lease_ttl=1)
         await worker._execute_row({"id": uuid4(), "kind": "slow", "payload": {}, "timeout_s": 0.01})
         assert backend.timed_out
+
+    asyncio.run(_run())
+
+
+def test_worker_kills_subprocess_on_timeout(tmp_path) -> None:
+    async def _run() -> None:
+        backend = _Backend()
+        executor = SubprocessExecutor()
+        worker = Worker(_Engine(backend, [executor]), lease_ttl=1)
+        pid_file = tmp_path / "child.pid"
+
+        await worker._execute_row(
+            {
+                "id": uuid4(),
+                "kind": executor.kind,
+                "payload": {
+                    "cmd": [
+                        "python3",
+                        "-c",
+                        (
+                            "import os, time, pathlib; "
+                            f"pathlib.Path('{pid_file}').write_text(str(os.getpid())); "
+                            "time.sleep(10)"
+                        ),
+                    ]
+                },
+                "timeout_s": 0.05,
+            }
+        )
+
+        if not pid_file.exists():
+            pytest.fail("child pid file not created")
+
+        pid = int(pid_file.read_text())
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
 
     asyncio.run(_run())
 
