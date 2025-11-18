@@ -120,7 +120,7 @@ class Worker:
             await self.engine.timeout(job_id, expected_version=expected_version)
         except asyncio.CancelledError:
             await self.engine.fail(job_id, {"error": "cancelled"}, expected_version=expected_version)
-            raise
+            return
         except Exception as exc:  # pragma: no cover - defensive
             attempts = (row.get("attempts") or 0) + 1
             if attempts >= row.get("max_attempts", 3):

@@ -207,8 +207,7 @@ def test_worker_execute_cancelled_error() -> None:
 
         executor = _Executor(kind="boom", behavior=cancelled)
         worker = Worker(_Engine(backend, [executor]))
-        with pytest.raises(asyncio.CancelledError):
-            await worker._execute_row({"id": uuid4(), "kind": "boom", "payload": {}})
+        await worker._execute_row({"id": uuid4(), "kind": "boom", "payload": {}})
         assert backend.failed[0][1] == {"error": "cancelled"}
 
     asyncio.run(_run())
