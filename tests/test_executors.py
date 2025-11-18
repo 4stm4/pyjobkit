@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass
 from typing import Any, List
 from uuid import uuid4
@@ -122,5 +123,49 @@ def test_subprocess_executor_exec_and_shell() -> None:
         )
         assert result_shell["returncode"] == 0
         assert any("shell" in message for _, message in ctx_shell.logs)
+
+    asyncio.run(_run())
+
+
+def test_subprocess_executor_cancels_process(tmp_path) -> None:
+    async def _run() -> None:
+        pid_file = tmp_path / "child.pid"
+        ctx = TestContext()
+        executor = SubprocessExecutor()
+
+        task = asyncio.create_task(
+            executor.run(
+                job_id=uuid4(),
+                payload={
+                    "cmd": [
+                        "python3",
+                        "-c",
+                        (
+                            "import os, time, pathlib; "
+                            f"pathlib.Path('{pid_file}').write_text(str(os.getpid())); "
+                            "time.sleep(10)"
+                        ),
+                    ]
+                },
+                ctx=ctx,
+            )
+        )
+        for _ in range(20):
+            if pid_file.exists():
+                break
+            await asyncio.sleep(0.01)
+        else:
+            pytest.fail("child pid file not created")
+
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        pid = int(pid_file.read_text())
+        # Allow a brief moment for the process to receive the signal.
+        await asyncio.sleep(0.05)
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
 
     asyncio.run(_run())
