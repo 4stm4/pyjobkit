@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import re
@@ -14,6 +15,7 @@ from .events.local import LocalEventBus
 from .logging.memory import MemoryLogSink
 
 PROGRESS_TOPIC_TEMPLATE = "job.{job_id}.progress"
+logger = logging.getLogger(__name__)
 
 
 class ExecContextFactory(Protocol):
@@ -168,12 +170,29 @@ class Engine:
             else None
         )
 
+        last_log_time = datetime.now(timezone.utc)
+
         while True:
             depth = await self.queue_depth()
             if depth < self.max_queue_size:
                 return
+            if deadline is None:
+                raise TimeoutError(
+                    "queue capacity reached and enqueue_timeout_s is not set; "
+                    "provide a timeout to wait for capacity or increase max_queue_size"
+                )
             if deadline and datetime.now(timezone.utc) >= deadline:
                 raise TimeoutError("enqueue timed out waiting for queue capacity")
+
+            now = datetime.now(timezone.utc)
+            if (now - last_log_time).total_seconds() >= 1:
+                logger.warning(
+                    "enqueue waiting for capacity: depth=%s max_queue_size=%s timeout_s=%s",
+                    depth,
+                    self.max_queue_size,
+                    self.enqueue_timeout_s,
+                )
+                last_log_time = now
             await asyncio.sleep(self._enqueue_check_interval_s)
 
     def __repr__(self) -> str:
