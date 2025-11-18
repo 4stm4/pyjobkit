@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import re
-from typing import Iterable
+from typing import Iterable, Protocol
 from uuid import UUID
 
 from .contracts import EventBus, ExecContext, Executor, LogRecord, LogSink, QueueBackend
@@ -16,8 +16,22 @@ from .logging.memory import MemoryLogSink
 PROGRESS_TOPIC_TEMPLATE = "job.{job_id}.progress"
 
 
+class ExecContextFactory(Protocol):
+    """Factory for creating execution contexts."""
+
+    def __call__(
+        self,
+        job_id: UUID,
+        /,
+        *,
+        log_sink: LogSink,
+        event_bus: EventBus,
+        backend: QueueBackend,
+    ) -> ExecContext: ...
+
+
 @dataclass(slots=True)
-class _Ctx(ExecContext):  # type: ignore[misc]
+class DefaultExecContext(ExecContext):  # type: ignore[misc]
     job_id: UUID
     log_sink: LogSink
     event_bus: EventBus
@@ -49,6 +63,7 @@ class Engine:
         max_queue_size: int | None = None,
         enqueue_timeout_s: float | None = None,
         enqueue_check_interval_s: float = 0.1,
+        exec_context_factory: ExecContextFactory | None = None,
     ) -> None:
         self.backend = backend
         self.executors = self._build_executor_map(executors)
@@ -57,6 +72,7 @@ class Engine:
         self.max_queue_size = max_queue_size
         self.enqueue_timeout_s = enqueue_timeout_s
         self._enqueue_check_interval_s = enqueue_check_interval_s
+        self._exec_context_factory = exec_context_factory or DefaultExecContext
 
     async def enqueue(
         self,
@@ -92,7 +108,12 @@ class Engine:
         return self.executors.get(kind)
 
     def make_ctx(self, job_id: UUID) -> ExecContext:
-        return _Ctx(job_id, self.log_sink, self.event_bus, self.backend)
+        return self._exec_context_factory(
+            job_id,
+            log_sink=self.log_sink,
+            event_bus=self.event_bus,
+            backend=self.backend,
+        )
 
     async def claim_batch(self, worker_id: UUID, *, limit: int = 1) -> list[QueueBackend.ClaimedJob]:
         return await self.backend.claim_batch(worker_id, limit=limit)
