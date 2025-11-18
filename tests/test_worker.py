@@ -45,6 +45,7 @@ class _Backend:
         self.timed_out: list[tuple[UUID, int | None]] = []
         self.retried: list[tuple[UUID, float]] = []
         self.extended: list[UUID] = []
+        self.reaped: int = 0
 
     async def claim_batch(self, worker_id: UUID, *, limit: int = 1) -> list[dict]:
         return self.rows.pop(0) if self.rows else []
@@ -78,6 +79,16 @@ class _Backend:
     async def retry(self, job_id: UUID, *, delay: float) -> None:
         self.retried.append((job_id, delay))
 
+    async def reap_expired(self) -> int:
+        self.reaped += 1
+        return self.reaped
+
+    async def check_connection(self) -> None:
+        return None
+
+    async def queue_depth(self) -> int:
+        return sum(len(batch) for batch in self.rows)
+
 
 class _Engine:
     def __init__(self, backend: _Backend, executors: list[_Executor]):
@@ -92,6 +103,45 @@ class _Engine:
         ctx = _DummyCtx()
         self.contexts[job_id] = ctx
         return ctx
+
+    async def claim_batch(self, worker_id: UUID, *, limit: int = 1):
+        return await self.backend.claim_batch(worker_id, limit=limit)
+
+    async def mark_running(self, job_id: UUID, worker_id: UUID) -> None:
+        await self.backend.mark_running(job_id, worker_id)
+
+    async def extend_lease(
+        self,
+        job_id: UUID,
+        worker_id: UUID,
+        ttl_s: int,
+        *,
+        expected_version: int | None = None,
+    ) -> None:
+        await self.backend.extend_lease(
+            job_id, worker_id, ttl_s, expected_version=expected_version
+        )
+
+    async def succeed(self, job_id: UUID, result: dict, *, expected_version: int | None = None) -> None:
+        await self.backend.succeed(job_id, result, expected_version=expected_version)
+
+    async def fail(self, job_id: UUID, reason: dict, *, expected_version: int | None = None) -> None:
+        await self.backend.fail(job_id, reason, expected_version=expected_version)
+
+    async def timeout(self, job_id: UUID, *, expected_version: int | None = None) -> None:
+        await self.backend.timeout(job_id, expected_version=expected_version)
+
+    async def retry(self, job_id: UUID, *, delay: float) -> None:
+        await self.backend.retry(job_id, delay=delay)
+
+    async def reap_expired(self) -> int:
+        return await self.backend.reap_expired()
+
+    async def check_connection(self) -> None:
+        await self.backend.check_connection()
+
+    async def queue_depth(self) -> int:
+        return await self.backend.queue_depth()
 
 
 def test_worker_run_processes_rows(monkeypatch) -> None:

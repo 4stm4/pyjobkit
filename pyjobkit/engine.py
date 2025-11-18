@@ -51,7 +51,7 @@ class Engine:
         enqueue_check_interval_s: float = 0.1,
     ) -> None:
         self.backend = backend
-        self.executors = {e.kind: e for e in executors}
+        self.executors = self._build_executor_map(executors)
         self.log_sink = log_sink or MemoryLogSink()
         self.event_bus = event_bus or LocalEventBus()
         self.max_queue_size = max_queue_size
@@ -94,6 +94,49 @@ class Engine:
     def make_ctx(self, job_id: UUID) -> ExecContext:
         return _Ctx(job_id, self.log_sink, self.event_bus, self.backend)
 
+    async def claim_batch(self, worker_id: UUID, *, limit: int = 1) -> list[QueueBackend.ClaimedJob]:
+        return await self.backend.claim_batch(worker_id, limit=limit)
+
+    async def mark_running(self, job_id: UUID, worker_id: UUID) -> None:
+        await self.backend.mark_running(job_id, worker_id)
+
+    async def extend_lease(
+        self,
+        job_id: UUID,
+        worker_id: UUID,
+        ttl_s: int,
+        *,
+        expected_version: int | None = None,
+    ) -> None:
+        await self.backend.extend_lease(
+            job_id, worker_id, ttl_s, expected_version=expected_version
+        )
+
+    async def succeed(
+        self, job_id: UUID, result: dict, *, expected_version: int | None = None
+    ) -> None:
+        await self.backend.succeed(job_id, result, expected_version=expected_version)
+
+    async def fail(
+        self, job_id: UUID, reason: dict, *, expected_version: int | None = None
+    ) -> None:
+        await self.backend.fail(job_id, reason, expected_version=expected_version)
+
+    async def timeout(self, job_id: UUID, *, expected_version: int | None = None) -> None:
+        await self.backend.timeout(job_id, expected_version=expected_version)
+
+    async def retry(self, job_id: UUID, *, delay: float) -> None:
+        await self.backend.retry(job_id, delay=delay)
+
+    async def reap_expired(self) -> int:
+        return await self.backend.reap_expired()
+
+    async def queue_depth(self) -> int:
+        return await self.backend.queue_depth()
+
+    async def check_connection(self) -> None:
+        await self.backend.check_connection()
+
     async def _wait_for_capacity(self) -> None:
         if self.max_queue_size is None:
             return
@@ -105,7 +148,7 @@ class Engine:
         )
 
         while True:
-            depth = await self.backend.queue_depth()
+            depth = await self.queue_depth()
             if depth < self.max_queue_size:
                 return
             if deadline and datetime.now(timezone.utc) >= deadline:
@@ -117,3 +160,12 @@ class Engine:
             f"Engine(max_queue_size={self.max_queue_size}, "
             f"enqueue_timeout_s={self.enqueue_timeout_s}, executors={list(self.executors)})"
         )
+
+    @staticmethod
+    def _build_executor_map(executors: Iterable[Executor]) -> dict[str, Executor]:
+        mapping: dict[str, Executor] = {}
+        for executor in executors:
+            if executor.kind in mapping:
+                raise ValueError(f"duplicate executor kind registered: {executor.kind}")
+            mapping[executor.kind] = executor
+        return mapping
