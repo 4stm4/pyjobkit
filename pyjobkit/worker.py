@@ -158,15 +158,23 @@ class Worker:
                 await asyncio.shield(lease_task)
 
     async def _extend_loop(self, job_id: UUID, expected_version: int | None) -> None:
+        interval = self.lease_ttl * 0.5
         try:
             while True:
-                await asyncio.sleep(self.lease_ttl * 0.5)
-                await self.engine.extend_lease(
-                    job_id,
-                    self.worker_id,
-                    self.lease_ttl,
-                    expected_version=expected_version,
-                )
+                await asyncio.sleep(interval)
+                try:
+                    await self.engine.extend_lease(
+                        job_id,
+                        self.worker_id,
+                        self.lease_ttl,
+                        expected_version=expected_version,
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    logger.warning(
+                        "extend_lease failed for job %s; retrying", job_id, exc_info=exc
+                    )
         except asyncio.CancelledError:
             return
 
