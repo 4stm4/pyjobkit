@@ -4,16 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import time
+from uuid import UUID
 
 import httpx
 
-from ..contracts import ExecContext
+from ..contracts import ExecContext, Executor
 
 
-class HttpExecutor:
+class HttpExecutor(Executor):
     kind = "http"
 
-    async def run(self, *, job_id, payload: dict, ctx: ExecContext) -> dict:  # type: ignore[override]
+    async def run(self, *, job_id: UUID, payload: dict, ctx: ExecContext) -> dict:
         method = payload.get("method", "GET").upper()
         url = payload["url"]
         timeout = payload.get("timeout", 30)

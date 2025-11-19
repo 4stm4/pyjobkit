@@ -1,43 +1,56 @@
-"""Core contracts used by Pyjobkit components."""
+"""Core contracts used by Pyjobkit components.
+
+This module exposes explicit abstract base classes rather than ``typing.Protocol``
+interfaces. Subclassing these contracts forces implementations to provide the
+full API at definition time instead of relying solely on structural typing that
+would otherwise be enforced only by optional type checking tools.
+"""
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Protocol, TypedDict
+from typing import Any, TypedDict
 from uuid import UUID
 
 
-class ExecContext(Protocol):
+class ExecContext(ABC):
     """Execution context passed to executors."""
 
-    async def log(self, message: str, /, *, stream: str = "stdout") -> None: ...
+    @abstractmethod
+    async def log(self, message: str, /, *, stream: str = "stdout") -> None:
+        """Persist a log line for the running job."""
 
-    async def is_cancelled(self) -> bool: ...
+    @abstractmethod
+    async def is_cancelled(self) -> bool:
+        """Return ``True`` if cancellation was requested for the job."""
 
-    async def set_progress(self, value: float, /, **meta: Any) -> None: ...
+    @abstractmethod
+    async def set_progress(self, value: float, /, **meta: Any) -> None:
+        """Publish a progress update with optional metadata."""
 
 
-class Executor(Protocol):
-    """Protocol for executor implementations."""
+class Executor(ABC):
+    """Abstract base class for executor implementations."""
 
     kind: str
 
-    async def run(self, *, job_id: UUID, payload: dict, ctx: ExecContext) -> dict: ...
+    @abstractmethod
+    async def run(self, *, job_id: UUID, payload: dict, ctx: ExecContext) -> dict:
+        """Execute a job and return the structured result."""
 
 
-class QueueBackend(Protocol):
+class QueueBackend(ABC):
     """Interface for queue backends."""
 
     class ClaimedJob(TypedDict):
         """Claimed job payload returned by :meth:`claim_batch`.
 
-        Attributes:
-            id: Unique job identifier.
-            kind: Executor kind requested by the job author.
-            payload: Job payload passed through to the executor.
-            timeout_s: Optional timeout for the job run in seconds.
-            lease_until: Backend-specific timestamp for the current lease.
+        Implementations **must** return a mapping containing at least ``id``,
+        ``kind``, ``payload``, ``timeout_s``, ``lease_until`` and ``version``
+        (for optimistic locking). Additional backend specific keys are allowed
+        and simply passed through to workers.
         """
 
         id: UUID | str
@@ -45,7 +58,9 @@ class QueueBackend(Protocol):
         payload: dict
         timeout_s: int | None
         lease_until: datetime | None
+        version: int | None
 
+    @abstractmethod
     async def enqueue(
         self,
         *,
@@ -55,39 +70,90 @@ class QueueBackend(Protocol):
         scheduled_for: datetime | None = None,
         max_attempts: int = 3,
         idempotency_key: str | None = None,
-        timeout_s: int | None = None,) -> UUID: ...
+        timeout_s: int | None = None,
+    ) -> UUID:
+        """Persist a job in the backend and return its identifier."""
 
-    async def get(self, job_id: UUID) -> dict: ...
+    @abstractmethod
+    async def get(self, job_id: UUID) -> dict:
+        """Return the backend specific representation for ``job_id``."""
 
-    async def cancel(self, job_id: UUID) -> None: ...
+    @abstractmethod
+    async def cancel(self, job_id: UUID) -> None:
+        """Request cancellation for ``job_id``."""
 
-    async def is_cancelled(self, job_id: UUID) -> bool: ...
+    @abstractmethod
+    async def is_cancelled(self, job_id: UUID) -> bool:
+        """Return ``True`` if cancellation has been requested."""
 
-    async def claim_batch(self, worker_id: UUID, *, limit: int = 1) -> list[ClaimedJob]: ...
+    @abstractmethod
+    async def claim_batch(self, worker_id: UUID, *, limit: int = 1) -> list[ClaimedJob]:
+        """Claim up to ``limit`` ready jobs for ``worker_id``."""
 
-    async def mark_running(self, job_id: UUID, worker_id: UUID) -> None: ...
+    @abstractmethod
+    async def mark_running(self, job_id: UUID, worker_id: UUID) -> None:
+        """Mark ``job_id`` as running for ``worker_id``."""
 
+    @abstractmethod
     async def extend_lease(
-        self, job_id: UUID, worker_id: UUID, ttl_s: int, *, expected_version: int | None = None
-    ) -> None: ...
+        self,
+        job_id: UUID,
+        worker_id: UUID,
+        ttl_s: int,
+        *,
+        expected_version: int | None = None,
+    ) -> None:
+        """Extend the lease for ``job_id``.
 
+        ``expected_version`` enables optimistic concurrency; implementations
+        should only update the lease when the stored version matches and report
+        failure silently otherwise.
+        """
+
+    @abstractmethod
     async def succeed(
-        self, job_id: UUID, result: dict, *, expected_version: int | None = None
-    ) -> None: ...
+        self,
+        job_id: UUID,
+        result: dict,
+        *,
+        expected_version: int | None = None,
+    ) -> None:
+        """Record a successful completion for ``job_id``."""
 
+    @abstractmethod
     async def fail(
-        self, job_id: UUID, reason: dict, *, expected_version: int | None = None
-    ) -> None: ...
+        self,
+        job_id: UUID,
+        reason: dict,
+        *,
+        expected_version: int | None = None,
+    ) -> None:
+        """Record a failure for ``job_id`` with structured ``reason``."""
 
-    async def timeout(self, job_id: UUID, *, expected_version: int | None = None) -> None: ...
+    @abstractmethod
+    async def timeout(
+        self,
+        job_id: UUID,
+        *,
+        expected_version: int | None = None,
+    ) -> None:
+        """Record a timeout outcome for ``job_id``."""
 
-    async def retry(self, job_id: UUID, *, delay: float) -> None: ...
+    @abstractmethod
+    async def retry(self, job_id: UUID, *, delay: float) -> None:
+        """Requeue ``job_id`` after ``delay`` seconds."""
 
-    async def reap_expired(self) -> int: ...
+    @abstractmethod
+    async def reap_expired(self) -> int:
+        """Return the number of jobs whose leases were reclaimed."""
 
-    async def queue_depth(self) -> int: ...
+    @abstractmethod
+    async def queue_depth(self) -> int:
+        """Return the count of runnable jobs in the backend."""
 
-    async def check_connection(self) -> None: ...
+    @abstractmethod
+    async def check_connection(self) -> None:
+        """Raise if the backend cannot be reached."""
 
 
 @dataclass(slots=True)
@@ -97,9 +163,17 @@ class LogRecord:
     message: str
 
 
-class LogSink(Protocol):
-    async def write(self, record: LogRecord) -> None: ...
+class LogSink(ABC):
+    """Destination for log records produced by executors."""
+
+    @abstractmethod
+    async def write(self, record: LogRecord) -> None:
+        """Persist ``record`` in the sink."""
 
 
-class EventBus(Protocol):
-    async def publish(self, topic: str, payload: dict) -> None: ...
+class EventBus(ABC):
+    """Publish/subscribe mechanism used for progress updates."""
+
+    @abstractmethod
+    async def publish(self, topic: str, payload: dict) -> None:
+        """Broadcast ``payload`` to subscribers listening on ``topic``."""

@@ -6,15 +6,18 @@ import asyncio
 import logging
 import os
 from contextlib import suppress
+from datetime import datetime
+from typing import Any, Awaitable, Callable
 from uuid import UUID, uuid4
 
 import pytest
 
 from pyjobkit.worker import Worker
 from pyjobkit.executors.subprocess import SubprocessExecutor
+from pyjobkit.contracts import ExecContext, Executor, QueueBackend
 
 
-class _DummyCtx:
+class _DummyCtx(ExecContext):
     def __init__(self) -> None:
         self.logs: list[tuple[str, str]] = []
 
@@ -24,24 +27,24 @@ class _DummyCtx:
     async def is_cancelled(self) -> bool:  # pragma: no cover - protocol requirement
         return False
 
-    async def set_progress(self, value: float, /, **meta):  # pragma: no cover
+    async def set_progress(self, value: float, /, **meta: Any) -> None:  # pragma: no cover
         self.logs.append(("progress", f"{value}:{meta}"))
 
 
-class _Executor:
-    def __init__(self, *, kind: str, behavior):
+class _Executor(Executor):
+    def __init__(self, *, kind: str, behavior: Callable[[UUID, dict, ExecContext], Awaitable[dict]]):
         self.kind = kind
         self.behavior = behavior
         self.calls: list[tuple[UUID, dict]] = []
 
-    async def run(self, *, job_id, payload: dict, ctx):  # type: ignore[override]
+    async def run(self, *, job_id: UUID, payload: dict, ctx: ExecContext) -> dict:
         self.calls.append((job_id, payload))
         return await self.behavior(job_id, payload, ctx)
 
 
-class _Backend:
+class _Backend(QueueBackend):
     def __init__(self) -> None:
-        self.rows: list[list[dict]] = []
+        self.rows: list[list[QueueBackend.ClaimedJob]] = []
         self.marked: list[UUID] = []
         self.succeeded: list[tuple[UUID, dict, int | None]] = []
         self.failed: list[tuple[UUID, dict, int | None]] = []
@@ -51,7 +54,31 @@ class _Backend:
         self.reaped: int = 0
         self.claim_limits: list[int] = []
 
-    async def claim_batch(self, worker_id: UUID, *, limit: int = 1) -> list[dict]:
+    async def enqueue(
+        self,
+        *,
+        kind: str,
+        payload: dict,
+        priority: int = 100,
+        scheduled_for: datetime | None = None,
+        max_attempts: int = 3,
+        idempotency_key: str | None = None,
+        timeout_s: int | None = None,
+    ) -> UUID:
+        raise NotImplementedError
+
+    async def get(self, job_id: UUID) -> dict:
+        raise NotImplementedError
+
+    async def cancel(self, job_id: UUID) -> None:
+        raise NotImplementedError
+
+    async def is_cancelled(self, job_id: UUID) -> bool:
+        return False
+
+    async def claim_batch(
+        self, worker_id: UUID, *, limit: int = 1
+    ) -> list[QueueBackend.ClaimedJob]:
         self.claim_limits.append(limit)
         return self.rows.pop(0) if self.rows else []
 
@@ -125,7 +152,9 @@ class _Engine:
         self.contexts[job_id] = ctx
         return ctx
 
-    async def claim_batch(self, worker_id: UUID, *, limit: int = 1):
+    async def claim_batch(
+        self, worker_id: UUID, *, limit: int = 1
+    ) -> list[QueueBackend.ClaimedJob]:
         return await self.backend.claim_batch(worker_id, limit=limit)
 
     async def mark_running(self, job_id: UUID, worker_id: UUID) -> None:
@@ -260,9 +289,11 @@ def test_worker_kills_subprocess_on_timeout(tmp_path) -> None:
                         ),
                     ]
                 },
-                "timeout_s": 0.05,
-            }
-        )
+                    # Allow enough time for the child process to start and write the PID
+                    # file before the worker times out the job.
+                    "timeout_s": 0.2,
+                }
+            )
 
         if not pid_file.exists():
             pytest.fail("child pid file not created")
@@ -379,7 +410,9 @@ def test_worker_logs_claim_batch_errors(monkeypatch, caplog) -> None:
             super().__init__()
             self.calls = 0
 
-        async def claim_batch(self, worker_id: UUID, *, limit: int = 1) -> list[dict]:
+        async def claim_batch(
+            self, worker_id: UUID, *, limit: int = 1
+        ) -> list[QueueBackend.ClaimedJob]:
             self.calls += 1
             if self.calls == 1:
                 raise RuntimeError("db down")

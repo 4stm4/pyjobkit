@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List
 from uuid import UUID, uuid4
 
 from ..contracts import QueueBackend
@@ -42,9 +42,18 @@ class MemoryBackend(QueueBackend):
         self._lock = asyncio.Lock()
         self.lease_ttl_s = lease_ttl_s
 
-    async def enqueue(self, **kwargs):  # type: ignore[override]
+    async def enqueue(
+        self,
+        *,
+        kind: str,
+        payload: dict,
+        priority: int = 100,
+        scheduled_for: datetime | None = None,
+        max_attempts: int = 3,
+        idempotency_key: str | None = None,
+        timeout_s: int | None = None,
+    ) -> UUID:
         async with self._lock:
-            idempotency_key = kwargs.get("idempotency_key")
             if idempotency_key:
                 for job in self._jobs.values():
                     if job.idempotency_key == idempotency_key:
@@ -54,36 +63,38 @@ class MemoryBackend(QueueBackend):
             job = _Job(
                 id=job_id,
                 created_at=now,
-                scheduled_for=kwargs.get("scheduled_for") or now,
-                max_attempts=kwargs.get("max_attempts", 3),
-                priority=kwargs.get("priority", 100),
-                kind=kwargs["kind"],
-                payload=kwargs.get("payload", {}),
+                scheduled_for=scheduled_for or now,
+                max_attempts=max_attempts,
+                priority=priority,
+                kind=kind,
+                payload=payload,
                 idempotency_key=idempotency_key,
-                timeout_s=kwargs.get("timeout_s"),
+                timeout_s=timeout_s,
             )
             self._jobs[job_id] = job
             return job_id
 
-    async def get(self, job_id: UUID) -> dict:  # type: ignore[override]
+    async def get(self, job_id: UUID) -> dict:
         async with self._lock:
             job = self._jobs.get(job_id)
             if not job:
                 raise KeyError(job_id)
             return self._job_to_dict(job)
 
-    async def cancel(self, job_id: UUID) -> None:  # type: ignore[override]
+    async def cancel(self, job_id: UUID) -> None:
         async with self._lock:
             job = self._jobs.get(job_id)
             if job:
                 job.cancel_requested = True
 
-    async def is_cancelled(self, job_id: UUID) -> bool:  # type: ignore[override]
+    async def is_cancelled(self, job_id: UUID) -> bool:
         async with self._lock:
             job = self._jobs.get(job_id)
             return bool(job and job.cancel_requested)
 
-    async def claim_batch(self, worker_id: UUID, *, limit: int = 1) -> List[dict]:  # type: ignore[override]
+    async def claim_batch(
+        self, worker_id: UUID, *, limit: int = 1
+    ) -> List[QueueBackend.ClaimedJob]:
         async with self._lock:
             now = datetime.now(UTC)
             candidates = sorted(
@@ -96,7 +107,7 @@ class MemoryBackend(QueueBackend):
                 ),
                 key=lambda j: (j.priority, j.created_at),
             )
-            claimed: List[dict] = []
+            claimed: List[QueueBackend.ClaimedJob] = []
             for job in candidates[:limit]:
                 job.lease_until = now + timedelta(seconds=self.lease_ttl_s)
                 job.leased_by = worker_id
@@ -104,7 +115,7 @@ class MemoryBackend(QueueBackend):
                 claimed.append(self._job_to_dict(job))
             return claimed
 
-    async def mark_running(self, job_id: UUID, worker_id: UUID) -> None:  # type: ignore[override]
+    async def mark_running(self, job_id: UUID, worker_id: UUID) -> None:
         async with self._lock:
             job = self._jobs[job_id]
             job.status = "running"
@@ -118,7 +129,7 @@ class MemoryBackend(QueueBackend):
         ttl_s: int,
         *,
         expected_version: int | None = None,
-    ) -> None:  # type: ignore[override]
+    ) -> None:
         async with self._lock:
             job = self._jobs[job_id]
             if job.leased_by == worker_id and (
@@ -128,22 +139,22 @@ class MemoryBackend(QueueBackend):
 
     async def succeed(
         self, job_id: UUID, result: dict, *, expected_version: int | None = None
-    ) -> None:  # type: ignore[override]
+    ) -> None:
         await self._finish(job_id, "success", result, expected_version=expected_version)
 
     async def fail(
         self, job_id: UUID, reason: dict, *, expected_version: int | None = None
-    ) -> None:  # type: ignore[override]
+    ) -> None:
         await self._finish(job_id, "failed", reason, expected_version=expected_version)
 
     async def timeout(
         self, job_id: UUID, *, expected_version: int | None = None
-    ) -> None:  # type: ignore[override]
+    ) -> None:
         await self._finish(
             job_id, "timeout", {"error": "timeout"}, expected_version=expected_version
         )
 
-    async def retry(self, job_id: UUID, *, delay: float) -> None:  # type: ignore[override]
+    async def retry(self, job_id: UUID, *, delay: float) -> None:
         async with self._lock:
             job = self._jobs[job_id]
             job.status = "queued"
@@ -152,7 +163,7 @@ class MemoryBackend(QueueBackend):
             job.leased_by = None
             job.version += 1
 
-    async def reap_expired(self) -> int:  # type: ignore[override]
+    async def reap_expired(self) -> int:
         async with self._lock:
             now = datetime.now(UTC)
             expired = [
@@ -172,15 +183,20 @@ class MemoryBackend(QueueBackend):
                 job.version += 1
             return len(expired)
 
-    async def queue_depth(self) -> int:  # type: ignore[override]
+    async def queue_depth(self) -> int:
         async with self._lock:
             return sum(1 for job in self._jobs.values() if job.status == "queued")
 
-    async def check_connection(self) -> None:  # type: ignore[override]
+    async def check_connection(self) -> None:
         return None
 
     async def _finish(
-        self, job_id: UUID, status: str, result: dict, *, expected_version: int | None
+        self,
+        job_id: UUID,
+        status: str,
+        result: dict,
+        *,
+        expected_version: int | None,
     ) -> None:
         async with self._lock:
             job = self._jobs[job_id]

@@ -4,21 +4,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
 from pyjobkit.backends.memory import MemoryBackend
 from pyjobkit.engine import DefaultExecContext, Engine
+from pyjobkit.contracts import ExecContext, Executor
 
 
-class _RecorderExecutor:
+class _RecorderExecutor(Executor):
     kind = "demo"
 
     def __init__(self) -> None:
         self.calls: list[tuple] = []
 
-    async def run(self, *, job_id, payload: dict, ctx):  # type: ignore[override]
+    async def run(self, *, job_id: UUID, payload: dict, ctx: ExecContext) -> dict:
         await ctx.log(f"running {payload['value']}")
         await ctx.set_progress(0.5, step="half")
         result = {"echo": payload, "job": str(job_id)}
@@ -112,10 +113,10 @@ def test_engine_register_executor_rejects_conflicts() -> None:
 
 
 def test_engine_register_executor_validates_kind_characters() -> None:
-    class _BadExecutor:
+    class _BadExecutor(Executor):
         kind = "bad kind"
 
-        async def run(self, *, job_id, payload: dict, ctx):  # type: ignore[override]
+        async def run(self, *, job_id: UUID, payload: dict, ctx: ExecContext) -> dict:
             return {}
 
     backend = MemoryBackend()
@@ -130,7 +131,7 @@ def test_engine_accepts_custom_exec_context_factory() -> None:
         created: list[tuple] = []
 
         class _CustomCtx(DefaultExecContext):
-            async def log(self, message: str, /, *, stream: str = "stdout") -> None:  # type: ignore[override]
+            async def log(self, message: str, /, *, stream: str = "stdout") -> None:
                 created.append((self.job_id, stream, message))
                 await super().log(message, stream=stream)
 

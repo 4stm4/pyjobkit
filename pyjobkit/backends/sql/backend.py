@@ -10,11 +10,12 @@ from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from .schema import JobTasks
+from ...contracts import QueueBackend
 
 UTC = timezone.utc
 
 
-class SQLBackend:
+class SQLBackend(QueueBackend):
     def __init__(
         self,
         engine: AsyncEngine,
@@ -36,27 +37,37 @@ class SQLBackend:
             ")"
         )
 
-    async def enqueue(self, **kwargs):  # type: ignore[override]
+    async def enqueue(
+        self,
+        *,
+        kind: str,
+        payload: dict,
+        priority: int = 100,
+        scheduled_for: datetime | None = None,
+        max_attempts: int = 3,
+        idempotency_key: str | None = None,
+        timeout_s: int | None = None,
+    ) -> UUID:
         job_id = uuid4()
         now = datetime.now(UTC)
         values = dict(
             id=str(job_id),
             status="queued",
             created_at=now,
-            scheduled_for=kwargs.get("scheduled_for") or now,
-            max_attempts=kwargs.get("max_attempts", 3),
-            priority=kwargs.get("priority", 100),
-            kind=kwargs["kind"],
-            payload=kwargs.get("payload", {}),
-            idempotency_key=kwargs.get("idempotency_key"),
-            timeout_s=kwargs.get("timeout_s"),
+            scheduled_for=scheduled_for or now,
+            max_attempts=max_attempts,
+            priority=priority,
+            kind=kind,
+            payload=payload,
+            idempotency_key=idempotency_key,
+            timeout_s=timeout_s,
         )
         async with self.sessionmaker() as session:
             await session.execute(JobTasks.insert().values(**values))
             await session.commit()
         return job_id
 
-    async def get(self, job_id: UUID) -> dict:  # type: ignore[override]
+    async def get(self, job_id: UUID) -> dict:
         async with self.sessionmaker() as session:
             row = (
                 await session.execute(select(JobTasks).where(JobTasks.c.id == str(job_id)))
@@ -65,14 +76,14 @@ class SQLBackend:
                 raise KeyError(job_id)
             return self._row_to_dict(row)
 
-    async def cancel(self, job_id: UUID) -> None:  # type: ignore[override]
+    async def cancel(self, job_id: UUID) -> None:
         async with self.sessionmaker() as session:
             await session.execute(
                 update(JobTasks).where(JobTasks.c.id == str(job_id)).values(cancel_requested=True)
             )
             await session.commit()
 
-    async def is_cancelled(self, job_id: UUID) -> bool:  # type: ignore[override]
+    async def is_cancelled(self, job_id: UUID) -> bool:
         async with self.sessionmaker() as session:
             row = (
                 await session.execute(
@@ -81,7 +92,9 @@ class SQLBackend:
             ).first()
             return bool(row and row.cancel_requested)
 
-    async def claim_batch(self, worker_id: UUID, *, limit: int = 1) -> List[dict]:  # type: ignore[override]
+    async def claim_batch(
+        self, worker_id: UUID, *, limit: int = 1
+    ) -> List[QueueBackend.ClaimedJob]:
         if self.engine.dialect.name == "postgresql" and self.prefer_pg_skip_locked:
             rows = await self._claim_pg(worker_id, limit)
         else:
@@ -155,7 +168,7 @@ class SQLBackend:
                     await session.rollback()
             return picked
 
-    async def mark_running(self, job_id: UUID, worker_id: UUID) -> None:  # type: ignore[override]
+    async def mark_running(self, job_id: UUID, worker_id: UUID) -> None:
         async with self.sessionmaker() as session:
             await session.execute(
                 update(JobTasks)
@@ -175,7 +188,7 @@ class SQLBackend:
         ttl_s: int,
         *,
         expected_version: int | None = None,
-    ) -> None:  # type: ignore[override]
+    ) -> None:
         async with self.sessionmaker() as session:
             stmt = (
                 update(JobTasks)
@@ -191,22 +204,22 @@ class SQLBackend:
 
     async def succeed(
         self, job_id: UUID, result: dict, *, expected_version: int | None = None
-    ) -> None:  # type: ignore[override]
+    ) -> None:
         await self._finish(job_id, "success", result, expected_version=expected_version)
 
     async def fail(
         self, job_id: UUID, reason: dict, *, expected_version: int | None = None
-    ) -> None:  # type: ignore[override]
+    ) -> None:
         await self._finish(job_id, "failed", reason, expected_version=expected_version)
 
     async def timeout(
         self, job_id: UUID, *, expected_version: int | None = None
-    ) -> None:  # type: ignore[override]
+    ) -> None:
         await self._finish(
             job_id, "timeout", {"error": "timeout"}, expected_version=expected_version
         )
 
-    async def retry(self, job_id: UUID, *, delay: float) -> None:  # type: ignore[override]
+    async def retry(self, job_id: UUID, *, delay: float) -> None:
         retry_at = datetime.now(UTC) + timedelta(seconds=delay)
         async with self.sessionmaker() as session:
             await session.execute(
@@ -223,7 +236,7 @@ class SQLBackend:
             )
             await session.commit()
 
-    async def reap_expired(self) -> int:  # type: ignore[override]
+    async def reap_expired(self) -> int:
         now = datetime.now(UTC)
         async with self.sessionmaker() as session:
             expired_rows = (
@@ -256,7 +269,7 @@ class SQLBackend:
             await session.commit()
             return updated
 
-    async def queue_depth(self) -> int:  # type: ignore[override]
+    async def queue_depth(self) -> int:
         async with self.sessionmaker() as session:
             result = await session.execute(
                 select(func.count()).select_from(
@@ -269,7 +282,7 @@ class SQLBackend:
             count = result.scalar()
             return int(count or 0)
 
-    async def check_connection(self) -> None:  # type: ignore[override]
+    async def check_connection(self) -> None:
         async with self.engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
 
