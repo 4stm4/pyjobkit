@@ -49,8 +49,10 @@ class _Backend:
         self.retried: list[tuple[UUID, float]] = []
         self.extended: list[UUID] = []
         self.reaped: int = 0
+        self.claim_limits: list[int] = []
 
     async def claim_batch(self, worker_id: UUID, *, limit: int = 1) -> list[dict]:
+        self.claim_limits.append(limit)
         return self.rows.pop(0) if self.rows else []
 
     async def mark_running(self, job_id: UUID, worker_id: UUID) -> None:
@@ -91,6 +93,22 @@ class _Backend:
 
     async def queue_depth(self) -> int:
         return sum(len(batch) for batch in self.rows)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"max_concurrency": 0},
+        {"batch": 0},
+        {"poll_interval": 0},
+        {"lease_ttl": 0},
+        {"queue_capacity": 0},
+        {"stop_timeout": 0},
+    ],
+)
+def test_worker_rejects_invalid_configuration(kwargs) -> None:
+    with pytest.raises(ValueError):
+        Worker(_Engine(_Backend(), []), **kwargs)
 
 
 class _Engine:
@@ -168,6 +186,26 @@ def test_worker_run_processes_rows(monkeypatch) -> None:
         assert backend.extended  # lease loop kicked in
 
     monkeypatch.setattr("pyjobkit.worker.random.random", lambda: 0.0)
+    asyncio.run(_run())
+
+
+def test_worker_limits_claims_to_concurrency(monkeypatch) -> None:
+    async def _run() -> None:
+        backend = _Backend()
+        worker = Worker(_Engine(backend, []), max_concurrency=2, batch=5, poll_interval=0.01)
+        backend.rows = [[{"id": str(uuid4()), "kind": "demo", "payload": {}}]]
+
+        async def behavior(job_id, payload, ctx):
+            worker.request_stop()
+            return {"ok": True}
+
+        executor = _Executor(kind="demo", behavior=behavior)
+        worker.engine._executors = {"demo": executor}
+
+        monkeypatch.setattr("pyjobkit.worker.random.random", lambda: 0.0)
+        await asyncio.wait_for(worker.run(), timeout=1)
+        assert backend.claim_limits[0] == 2
+
     asyncio.run(_run())
 
 
