@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import re
-from typing import Iterable, Protocol
+from typing import Any, Iterable, Protocol
 from uuid import UUID
 
 from .contracts import EventBus, ExecContext, Executor, LogRecord, LogSink, QueueBackend
@@ -34,19 +34,19 @@ class ExecContextFactory(Protocol):
 
 
 @dataclass(slots=True)
-class DefaultExecContext(ExecContext):  # type: ignore[misc]
+class DefaultExecContext(ExecContext):
     job_id: UUID
     log_sink: LogSink
     event_bus: EventBus
     backend: QueueBackend
 
-    async def log(self, message: str, /, *, stream: str = "stdout") -> None:  # type: ignore[override]
+    async def log(self, message: str, /, *, stream: str = "stdout") -> None:
         await self.log_sink.write(LogRecord(self.job_id, stream, message))
 
-    async def is_cancelled(self) -> bool:  # type: ignore[override]
+    async def is_cancelled(self) -> bool:
         return await self.backend.is_cancelled(self.job_id)
 
-    async def set_progress(self, value: float, /, **meta):  # type: ignore[override]
+    async def set_progress(self, value: float, /, **meta: Any) -> None:
         await self.event_bus.publish(
             PROGRESS_TOPIC_TEMPLATE.format(job_id=self.job_id),
             {"value": value, **meta},
@@ -54,7 +54,18 @@ class DefaultExecContext(ExecContext):  # type: ignore[misc]
 
 
 class Engine:
-    """Front-end for enqueueing and introspecting jobs."""
+    """Front-end for enqueueing and introspecting jobs.
+
+    Parameters:
+        backend: Queue storage implementation responsible for persistence and state.
+        executors: Iterable of executor implementations to register immediately.
+        log_sink: Destination for log messages; defaults to in-memory sink.
+        event_bus: Event bus for progress updates; defaults to in-process bus.
+        max_queue_size: Optional cap on queued jobs before enqueue blocks.
+        enqueue_timeout_s: Optional timeout while waiting for queue capacity.
+        enqueue_check_interval_s: Polling interval for queue depth checks.
+        exec_context_factory: Factory for creating ``ExecContext`` instances.
+    """
 
     def __init__(
         self,
@@ -92,8 +103,22 @@ class Engine:
     ) -> UUID:
         """Enqueue a job for processing and return its identifier.
 
-        The method's primary effect is placing the job into the backend queue; the
-        returned UUID allows callers to track execution progress later.
+        The job is validated against registered ``kind`` patterns and then queued
+        in the configured backend. If ``max_queue_size`` is set, the method waits
+        for capacity for up to ``enqueue_timeout_s`` seconds before raising
+        :class:`TimeoutError`.
+
+        Args:
+            kind: Identifier of the executor that should handle the job.
+            payload: Arbitrary JSON-serializable payload passed to the executor.
+            priority: Lower values are executed sooner (backend-specific).
+            scheduled_for: Optional time to delay execution until.
+            max_attempts: Maximum retry attempts for the job.
+            idempotency_key: Optional key used to de-duplicate enqueues.
+            timeout_s: Optional time limit for job execution.
+
+        Returns:
+            UUID: The identifier of the enqueued job.
         """
 
         if not KIND_PATTERN.fullmatch(kind):
@@ -120,9 +145,14 @@ class Engine:
         return job_id
 
     async def get(self, job_id: UUID) -> dict:
+        """Retrieve job metadata from the backend."""
+
+        logger.debug("get requested: job_id=%s", job_id)
         return await self.backend.get(job_id)
 
     async def cancel(self, job_id: UUID) -> None:
+        """Request cancellation of a job in the backend."""
+
         logger.info("cancel requested: job_id=%s", job_id)
         await self.backend.cancel(job_id)
 
@@ -210,50 +240,70 @@ class Engine:
 
         waited_for_capacity = False
 
-        while True:
-            depth = await self.queue_depth()
-            if depth < self.max_queue_size:
-                if deadline is not None and waited_for_capacity:
-                    logger.info(
-                        "enqueue capacity available after waiting: depth=%s max_queue_size=%s",
+        try:
+            while True:
+                depth = await self.queue_depth()
+                if depth < self.max_queue_size:
+                    if deadline is not None and waited_for_capacity:
+                        logger.info(
+                            "enqueue capacity available after waiting: depth=%s max_queue_size=%s",
+                            depth,
+                            self.max_queue_size,
+                        )
+                    return
+                waited_for_capacity = True
+                if deadline is None:
+                    logger.error(
+                        "enqueue capacity reached without timeout: depth=%s max_queue_size=%s",
                         depth,
                         self.max_queue_size,
                     )
-                return
-            waited_for_capacity = True
-            if deadline is None:
-                logger.error(
-                    "enqueue capacity reached without timeout: depth=%s max_queue_size=%s",
-                    depth,
-                    self.max_queue_size,
-                )
-                raise TimeoutError(
-                    "queue capacity reached and enqueue_timeout_s is not set; "
-                    "provide a timeout to wait for capacity or increase max_queue_size"
-                )
-            if deadline and datetime.now(timezone.utc) >= deadline:
-                logger.error(
-                    "enqueue timed out waiting for queue capacity: depth=%s max_queue_size=%s timeout_s=%s",
-                    depth,
-                    self.max_queue_size,
-                    self.enqueue_timeout_s,
-                )
-                raise TimeoutError("enqueue timed out waiting for queue capacity")
+                    raise TimeoutError(
+                        "queue capacity reached and enqueue_timeout_s is not set; "
+                        "provide a timeout to wait for capacity or increase max_queue_size"
+                    )
+                now = datetime.now(timezone.utc)
+                if now >= deadline:
+                    logger.error(
+                        "enqueue timed out waiting for queue capacity: depth=%s max_queue_size=%s timeout_s=%s",
+                        depth,
+                        self.max_queue_size,
+                        self.enqueue_timeout_s,
+                    )
+                    raise TimeoutError("enqueue timed out waiting for queue capacity")
 
-            now = datetime.now(timezone.utc)
-            if (now - last_log_time).total_seconds() >= 1:
-                logger.warning(
-                    "enqueue waiting for capacity: depth=%s max_queue_size=%s timeout_s=%s",
-                    depth,
-                    self.max_queue_size,
-                    self.enqueue_timeout_s,
+                if (now - last_log_time).total_seconds() >= 1:
+                    logger.warning(
+                        "enqueue waiting for capacity: depth=%s max_queue_size=%s timeout_s=%s",
+                        depth,
+                        self.max_queue_size,
+                        self.enqueue_timeout_s,
+                    )
+                    last_log_time = now
+
+                sleep_time = min(
+                    self._enqueue_check_interval_s,
+                    (deadline - now).total_seconds() if deadline else self._enqueue_check_interval_s,
                 )
-                last_log_time = now
-            await asyncio.sleep(self._enqueue_check_interval_s)
+                await asyncio.sleep(sleep_time)
+        except asyncio.CancelledError:
+            logger.info("enqueue wait cancelled; aborting capacity wait")
+            raise
 
     def __repr__(self) -> str:
+        executors_repr = {kind: executor.__class__.__name__ for kind, executor in self.executors.items()}
         return (
             f"Engine(max_queue_size={self.max_queue_size}, "
-            f"enqueue_timeout_s={self.enqueue_timeout_s}, executors={list(self.executors)})"
+            f"enqueue_timeout_s={self.enqueue_timeout_s}, executors={executors_repr})"
         )
+
+    async def close(self) -> None:
+        """Release held resources for backend, log sink, or event bus when supported."""
+
+        for component in (self.backend, self.log_sink, self.event_bus):
+            close = getattr(component, "close", None)
+            if callable(close):
+                result = close()
+                if asyncio.iscoroutine(result):
+                    await result
 
