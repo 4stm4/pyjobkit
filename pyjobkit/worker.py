@@ -1,4 +1,10 @@
-"""Async worker implementation built on asyncio.TaskGroup."""
+"""Async worker implementation built on :mod:`asyncio` primitives.
+
+The worker coordinates claiming jobs from a backend and executing them with a
+bounded degree of concurrency. It provides cooperative shutdown hooks to allow
+callers to signal termination and await graceful teardown via
+:meth:`request_stop` and :meth:`wait_stopped`.
+"""
 
 from __future__ import annotations
 
@@ -25,6 +31,7 @@ class Worker:
         poll_interval: float = 0.5,
         lease_ttl: int = 30,
         queue_capacity: int | None = None,
+        stop_timeout: float | None = 60,
     ) -> None:
         self.engine = engine
         self.max_concurrency = max_concurrency
@@ -32,6 +39,7 @@ class Worker:
         self.poll_interval = poll_interval
         self.lease_ttl = lease_ttl
         self.queue_capacity = queue_capacity
+        self.stop_timeout = stop_timeout
         self.worker_id = uuid4()
         self._stop = asyncio.Event()
         self._stopped = asyncio.Event()
@@ -40,6 +48,21 @@ class Worker:
         self._active_jobs = 0
         self._active_jobs_zero = asyncio.Event()
         self._active_jobs_zero.set()
+        self._validate_configuration()
+        self._claim_limit = min(self.batch, self.max_concurrency)
+        if self.batch > self.max_concurrency:
+            logger.debug(
+                "batch size %s exceeds concurrency %s; limiting claims per poll",
+                self.batch,
+                self.max_concurrency,
+            )
+        backend_lease_ttl = getattr(self.engine.backend, "lease_ttl_s", None)
+        if backend_lease_ttl is not None and backend_lease_ttl != self.lease_ttl:
+            logger.warning(
+                "Worker lease_ttl=%s differs from backend lease_ttl_s=%s; renewals may drift",
+                self.lease_ttl,
+                backend_lease_ttl,
+            )
 
     def __repr__(self) -> str:  # pragma: no cover - debugging helper
         return (
@@ -62,7 +85,9 @@ class Worker:
                 tg.create_task(self._reap_loop())
                 while not self._stop.is_set():
                     try:
-                        rows = await self.engine.claim_batch(self.worker_id, limit=self.batch)
+                        rows = await self.engine.claim_batch(
+                            self.worker_id, limit=self._claim_limit
+                        )
                         backoff = self.poll_interval
                     except Exception as exc:
                         logger.warning(
@@ -90,7 +115,7 @@ class Worker:
             raise
         finally:
             try:
-                await asyncio.wait_for(asyncio.shield(self._drain()), timeout=60)
+                await self._wait_for_drain()
             finally:
                 self._stopped.set()
 
@@ -168,9 +193,31 @@ class Worker:
         for task in list(self._tasks):
             task.cancel()
         if self._tasks:
-            with suppress(Exception):
-                await asyncio.gather(*self._tasks, return_exceptions=True)
+            results = await asyncio.gather(*self._tasks, return_exceptions=True)
+            for result in results:
+                if isinstance(result, Exception) and not isinstance(
+                    result, asyncio.CancelledError
+                ):
+                    logger.warning("Task raised during shutdown: %s", result, exc_info=result)
         await self._active_jobs_zero.wait()
+
+    async def _wait_for_drain(self) -> None:
+        drain_task = asyncio.create_task(self._drain())
+        try:
+            if self.stop_timeout is None:
+                await asyncio.shield(drain_task)
+            else:
+                await asyncio.wait_for(asyncio.shield(drain_task), timeout=self.stop_timeout)
+        except asyncio.TimeoutError:
+            logger.error(
+                "Worker shutdown timed out after %.2fs; %d tasks may still be running",
+                self.stop_timeout,
+                len(self._tasks),
+            )
+        finally:
+            drain_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await asyncio.shield(drain_task)
 
     async def check_health(self) -> dict[str, Any]:
         try:
@@ -200,3 +247,17 @@ class Worker:
         self._active_jobs -= 1
         if self._active_jobs == 0:
             self._active_jobs_zero.set()
+
+    def _validate_configuration(self) -> None:
+        if self.max_concurrency <= 0:
+            raise ValueError("max_concurrency must be greater than 0")
+        if self.batch <= 0:
+            raise ValueError("batch must be greater than 0")
+        if self.poll_interval <= 0:
+            raise ValueError("poll_interval must be greater than 0")
+        if self.lease_ttl <= 0:
+            raise ValueError("lease_ttl must be greater than 0")
+        if self.queue_capacity is not None and self.queue_capacity <= 0:
+            raise ValueError("queue_capacity must be greater than 0 when provided")
+        if self.stop_timeout is not None and self.stop_timeout <= 0:
+            raise ValueError("stop_timeout must be greater than 0 when provided")
