@@ -366,6 +366,33 @@ def test_worker_extend_loop_can_be_cancelled() -> None:
     asyncio.run(_run())
 
 
+def test_worker_extend_loop_logs_and_recovers_from_errors(caplog) -> None:
+    class _ExplodingBackend(_Backend):
+        async def extend_lease(
+            self,
+            job_id: UUID,
+            worker_id: UUID,
+            ttl_s: int,
+            *,
+            expected_version: int | None = None,
+        ) -> None:
+            raise RuntimeError("db unavailable")
+
+    async def _run() -> None:
+        backend = _ExplodingBackend()
+        worker = Worker(_Engine(backend, []), lease_ttl=0.01)
+        caplog.set_level(logging.WARNING, "pyjobkit.worker")
+        task = asyncio.create_task(worker._extend_loop(uuid4(), None))
+        await asyncio.sleep(0.03)
+        assert not task.done()
+        assert any("extend_lease failed" in rec.message for rec in caplog.records)
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+    asyncio.run(_run())
+
+
 def test_worker_jitter_range() -> None:
     value = Worker._jitter(10.0)
     assert 8.0 <= value <= 12.0
