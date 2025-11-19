@@ -6,14 +6,15 @@ import asyncio
 import time
 from contextlib import suppress
 from typing import Any
+from uuid import UUID
 
-from ..contracts import ExecContext
+from ..contracts import ExecContext, Executor
 
 
-class SubprocessExecutor:
+class SubprocessExecutor(Executor):
     kind = "subprocess"
 
-    async def run(self, *, job_id, payload: dict, ctx: ExecContext) -> dict:  # type: ignore[override]
+    async def run(self, *, job_id: UUID, payload: dict, ctx: ExecContext) -> dict:
         cmd = payload["cmd"]
         env = payload.get("env")
         cwd = payload.get("cwd")

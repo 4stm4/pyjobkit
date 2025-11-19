@@ -19,7 +19,7 @@ class LocalEventBus(EventBus):
     def subscribe(self, topic: str, handler: Callable[[dict], Awaitable[None]]) -> None:
         self._subs[topic].append(handler)
 
-    async def publish(self, topic: str, payload: dict) -> None:  # type: ignore[override]
+    async def publish(self, topic: str, payload: dict) -> None:
         results = await asyncio.gather(
             *(handler(payload) for handler in self._subs.get(topic, ())),
             return_exceptions=True,

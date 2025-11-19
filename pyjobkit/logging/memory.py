@@ -20,7 +20,7 @@ class MemoryLogSink(LogSink):
         self._lock = asyncio.Lock()
         self._thread_lock = threading.Lock()
 
-    async def write(self, record: LogRecord) -> None:  # type: ignore[override]
+    async def write(self, record: LogRecord) -> None:
         async with self._lock:
             with self._thread_lock:
                 log = self._logs[record.job_id]
