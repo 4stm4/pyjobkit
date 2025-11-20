@@ -48,21 +48,22 @@ def test_memory_backend_full_lifecycle() -> None:
         await backend.cancel(missing_id)  # silently ignored
         cancelled = await backend.get(job_ids[0])
         assert cancelled["cancel_requested"] is True
+        assert cancelled["status"] == "cancelled"
 
         worker_id = uuid4()
         rows = await backend.claim_batch(worker_id, limit=5)
-        assert [row["payload"]["idx"] for row in rows] == [1, 0]
+        assert [row["payload"]["idx"] for row in rows] == [1]
         assert rows[0]["lease_until"] is not None
 
         await backend.mark_running(rows[0]["id"], worker_id)
         await backend.extend_lease(rows[0]["id"], worker_id, ttl_s=2)
         await backend.succeed(rows[0]["id"], {"ok": True})
-        await backend.fail(rows[1]["id"], {"error": "boom"})
+        await backend.fail(job_ids[2], {"error": "boom"})
 
         timeout_job = await backend.enqueue(kind="beta", payload={})
         await backend.timeout(timeout_job)
         success = await backend.get(rows[0]["id"])
-        failed = await backend.get(rows[1]["id"])
+        failed = await backend.get(job_ids[2])
         timed_out = await backend.get(timeout_job)
         assert success["status"] == "success" and success["result"] == {"ok": True}
         assert failed["status"] == "failed" and failed["result"] == {"error": "boom"}

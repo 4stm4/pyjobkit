@@ -86,6 +86,13 @@ class MemoryBackend(QueueBackend):
             job = self._jobs.get(job_id)
             if job:
                 job.cancel_requested = True
+                if job.status in {"queued", "running"}:
+                    job.status = "cancelled"
+                    job.finished_at = datetime.now(UTC)
+                    job.result = {"error": "cancelled"}
+                    job.lease_until = None
+                    job.leased_by = None
+                    job.version += 1
 
     async def is_cancelled(self, job_id: UUID) -> bool:
         async with self._lock:

@@ -88,6 +88,20 @@ class SQLBackend(QueueBackend):
             await session.execute(
                 update(JobTasks).where(JobTasks.c.id == str(job_id)).values(cancel_requested=True)
             )
+            await session.execute(
+                update(JobTasks)
+                .where(JobTasks.c.id == str(job_id))
+                .where(JobTasks.c.status.in_(["queued", "running"]))
+                .values(
+                    cancel_requested=True,
+                    status="cancelled",
+                    finished_at=datetime.now(UTC),
+                    result={"error": "cancelled"},
+                    lease_until=None,
+                    leased_by=None,
+                    version=JobTasks.c.version + 1,
+                )
+            )
             await session.commit()
 
     async def is_cancelled(self, job_id: UUID) -> bool:

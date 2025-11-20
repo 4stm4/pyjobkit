@@ -39,6 +39,7 @@ async def _exercise_engine() -> None:
     await engine.cancel(job_id)
     cancelled = await engine.get(job_id)
     assert cancelled["cancel_requested"] is True
+    assert cancelled["status"] == "cancelled"
 
     # Execution context plumbing uses the configured log sink and event bus.
     ctx = engine.make_ctx(job_id)
