@@ -204,8 +204,13 @@ class Worker:
                 await asyncio.shield(lease_task)
 
     async def _extend_loop(
-        self, job_id: UUID, expected_version: int | None, lease_lost: asyncio.Event
+        self,
+        job_id: UUID,
+        expected_version: int | None,
+        lease_lost: asyncio.Event | None = None,
     ) -> None:
+        if lease_lost is None:
+            lease_lost = asyncio.Event()
         interval = self.lease_ttl * 0.5
         try:
             while True:

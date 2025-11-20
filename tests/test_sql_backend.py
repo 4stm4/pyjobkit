@@ -46,6 +46,10 @@ def _make_backend() -> SQLBackend:
     backend.prefer_pg_skip_locked = False
     backend.lease_ttl_s = 1
     backend.sessionmaker = lambda: _AsyncSessionWrapper(SyncSession())
+    # Ensure SQLite connections are properly disposed to avoid resource warnings.
+    import weakref
+
+    weakref.finalize(backend, sync_engine.dispose)
     return backend
 
 
