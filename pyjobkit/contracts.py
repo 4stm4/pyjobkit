@@ -41,6 +41,10 @@ class Executor(ABC):
         """Execute a job and return the structured result."""
 
 
+class OptimisticLockError(RuntimeError):
+    """Raised when an expected_version constraint no longer matches."""
+
+
 class QueueBackend(ABC):
     """Interface for queue backends."""
 

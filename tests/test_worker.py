@@ -369,7 +369,8 @@ def test_worker_extend_loop_can_be_cancelled() -> None:
     async def _run() -> None:
         backend = _Backend()
         worker = Worker(_Engine(backend, []), lease_ttl=0.01)
-        task = asyncio.create_task(worker._extend_loop(uuid4(), None))
+        lease_lost = asyncio.Event()
+        task = asyncio.create_task(worker._extend_loop(uuid4(), None, lease_lost))
         await asyncio.sleep(0.03)
         task.cancel()
         await task
@@ -393,7 +394,8 @@ def test_worker_extend_loop_logs_and_recovers_from_errors(caplog) -> None:
         backend = _ExplodingBackend()
         worker = Worker(_Engine(backend, []), lease_ttl=0.01)
         caplog.set_level(logging.WARNING, "pyjobkit.worker")
-        task = asyncio.create_task(worker._extend_loop(uuid4(), None))
+        lease_lost = asyncio.Event()
+        task = asyncio.create_task(worker._extend_loop(uuid4(), None, lease_lost))
         await asyncio.sleep(0.03)
         assert not task.done()
         assert any("extend_lease failed" in rec.message for rec in caplog.records)

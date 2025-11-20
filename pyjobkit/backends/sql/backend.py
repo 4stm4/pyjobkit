@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 import logging
-from typing import Any, Iterable, List
+from time import perf_counter
+from typing import Any, Awaitable, Callable, Iterable, List
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
+from sqlalchemy.exc import DBAPIError
 
 from .schema import JobTasks
-from ...contracts import QueueBackend
+from ...contracts import OptimisticLockError, QueueBackend
+from ... import metrics
 
 UTC = timezone.utc
 logger = logging.getLogger(__name__)
@@ -197,18 +201,44 @@ class SQLBackend(QueueBackend):
         *,
         expected_version: int | None = None,
     ) -> None:
-        async with self.sessionmaker() as session:
-            stmt = (
-                update(JobTasks)
-                .where(JobTasks.c.id == str(job_id))
-                .where(JobTasks.c.leased_by == str(worker_id))
+        start = perf_counter()
+
+        async def _op() -> None:
+            async with self.sessionmaker() as session:
+                try:
+                    stmt = (
+                        update(JobTasks)
+                        .where(JobTasks.c.id == str(job_id))
+                        .where(JobTasks.c.leased_by == str(worker_id))
+                    )
+                    if expected_version is not None:
+                        stmt = stmt.where(JobTasks.c.version == expected_version)
+                    res = await session.execute(
+                        stmt.values(lease_until=datetime.now(UTC) + timedelta(seconds=ttl_s))
+                    )
+                    if expected_version is not None and res.rowcount == 0:
+                        raise OptimisticLockError(
+                            f"extend_lease failed for {job_id} due to version mismatch"
+                        )
+                    await session.commit()
+                except Exception:
+                    await session.rollback()
+                    raise
+
+        try:
+            await self._retry_with_backoff(_op)
+        except OptimisticLockError:
+            metrics.extend_lease_conflicts.inc()
+            logger.warning(
+                "Version mismatch on extend_lease for job %s by worker %s (expected_version=%s)",
+                job_id,
+                worker_id,
+                expected_version,
             )
-            if expected_version is not None:
-                stmt = stmt.where(JobTasks.c.version == expected_version)
-            await session.execute(
-                stmt.values(lease_until=datetime.now(UTC) + timedelta(seconds=ttl_s))
-            )
-            await session.commit()
+            raise
+        finally:
+            metrics.extend_lease_latency.observe(perf_counter() - start)
+            metrics.lease_ttl_seconds.observe(ttl_s)
 
     async def succeed(
         self, job_id: UUID, result: dict, *, expected_version: int | None = None
@@ -297,21 +327,69 @@ class SQLBackend(QueueBackend):
     async def _finish(
         self, job_id: UUID, status: str, result: dict, *, expected_version: int | None
     ) -> None:
-        async with self.sessionmaker() as session:
-            stmt = update(JobTasks).where(JobTasks.c.id == str(job_id))
-            if expected_version is not None:
-                stmt = stmt.where(JobTasks.c.version == expected_version)
-            await session.execute(
-                stmt.values(
-                    status=status,
-                    finished_at=datetime.now(UTC),
-                    result=result,
-                    lease_until=None,
-                    leased_by=None,
-                    version=JobTasks.c.version + 1,
-                )
+        async def _op() -> None:
+            async with self.sessionmaker() as session:
+                try:
+                    stmt = update(JobTasks).where(JobTasks.c.id == str(job_id))
+                    if expected_version is not None:
+                        stmt = stmt.where(JobTasks.c.version == expected_version)
+                    res = await session.execute(
+                        stmt.values(
+                            status=status,
+                            finished_at=datetime.now(UTC),
+                            result=result,
+                            lease_until=None,
+                            leased_by=None,
+                            version=JobTasks.c.version + 1,
+                        )
+                    )
+                    if expected_version is not None and res.rowcount == 0:
+                        raise OptimisticLockError(
+                            f"finish failed for {job_id} due to version mismatch"
+                        )
+                    await session.commit()
+                except Exception:
+                    await session.rollback()
+                    raise
+
+        try:
+            await self._retry_with_backoff(_op)
+        except OptimisticLockError:
+            logger.warning(
+                "Version mismatch on finish for job %s (expected_version=%s)",
+                job_id,
+                expected_version,
             )
-            await session.commit()
+            raise
+
+    async def _retry_with_backoff(
+        self,
+        func: Callable[[], Awaitable[Any]],
+        *,
+        attempts: int = 3,
+        base_delay: float = 0.1,
+        max_delay: float = 2.0,
+    ) -> Any:
+        delay = base_delay
+        last_exc: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                return await func()
+            except (DBAPIError, ConnectionError) as exc:
+                last_exc = exc
+                if attempt == attempts:
+                    raise
+                logger.warning(
+                    "Transient backend error on attempt %s/%s; retrying in %.2fs",
+                    attempt,
+                    attempts,
+                    delay,
+                    exc_info=exc,
+                )
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, max_delay)
+        if last_exc:
+            raise last_exc
 
     @staticmethod
     def _row_to_dict(row: Any) -> dict:
