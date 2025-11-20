@@ -83,7 +83,7 @@ async def enqueue_job() -> dict[str, Any]:
 @app.get("/api/jobs")
 async def list_jobs() -> list[dict[str, Any]]:
     jobs = await backend.list_jobs()
-    jobs.sort(key=lambda job: job["created_at"])
+    jobs.sort(key=lambda job: job["created_at"], reverse=True)
     return [_serialize_job(job) for job in jobs]
 
 
@@ -126,9 +126,10 @@ PAGE_HTML = """
       h1 { margin-top: 0; }
       button { background: #2563eb; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 0.5rem; font-size: 1rem; cursor: pointer; }
       button:hover { background: #1d4ed8; }
-      table { width: 100%; border-collapse: collapse; margin-top: 1.5rem; }
+      .table-container { margin-top: 1.5rem; max-height: 420px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 0.75rem; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05); }
+      table { width: 100%; border-collapse: collapse; }
       th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid #e5e7eb; }
-      th { background: #e0e7ff; }
+      th { background: #e0e7ff; position: sticky; top: 0; z-index: 1; }
       tr:nth-child(even) { background: #f8fafc; }
       .status { text-transform: capitalize; font-weight: 600; }
       .status.queued { color: #92400e; }
@@ -143,20 +144,22 @@ PAGE_HTML = """
     <h1>Pyjobkit demo dashboard</h1>
     <p>Press the button to enqueue demo jobs that sleep for a random duration.</p>
     <button id=\"enqueue\">Enqueue demo job</button>
-    <table>
-      <thead>
-        <tr>
-          <th>Label</th>
-          <th>Status</th>
-          <th>Duration (s)</th>
-          <th>Result</th>
-          <th>Created</th>
-        </tr>
-      </thead>
-      <tbody id=\"jobs-body\">
-        <tr><td colspan=\"5\" class=\"muted\">No jobs yet</td></tr>
-      </tbody>
-    </table>
+    <div class=\"table-container\">
+      <table>
+        <thead>
+          <tr>
+            <th>Label</th>
+            <th>Status</th>
+            <th>Duration (s)</th>
+            <th>Result</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody id=\"jobs-body\">
+          <tr><td colspan=\"5\" class=\"muted\">No jobs yet</td></tr>
+        </tbody>
+      </table>
+    </div>
     <script>
       const body = document.getElementById('jobs-body');
       const button = document.getElementById('enqueue');
