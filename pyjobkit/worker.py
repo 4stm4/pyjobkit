@@ -170,6 +170,9 @@ class Worker:
             result = await exec_task
             await self.engine.succeed(job_id, result, expected_version=expected_version)
         except asyncio.TimeoutError:
+            exec_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await exec_task
             await self.engine.timeout(job_id, expected_version=expected_version)
         except LeaseLostError:
             logger.info("Lease lost for job %s; abandoning result", job_id)

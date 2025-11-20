@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import UUID, uuid4
@@ -127,7 +128,7 @@ def test_sql_backend_claim_batch_prefers_pg(monkeypatch) -> None:
     asyncio.run(_run())
 
 
-def test_sql_backend_extend_lease_version_mismatch() -> None:
+def test_sql_backend_extend_lease_version_mismatch(caplog) -> None:
     async def _run() -> None:
         backend = _make_backend()
         when = datetime.now(timezone.utc) - timedelta(seconds=1)
@@ -136,8 +137,28 @@ def test_sql_backend_extend_lease_version_mismatch() -> None:
         rows = await backend.claim_batch(worker, limit=1)
         assert rows and rows[0]["id"] == job
 
-        with pytest.raises(OptimisticLockError):
-            await backend.extend_lease(job, worker, ttl_s=1, expected_version=999)
+        with caplog.at_level(logging.WARNING):
+            with pytest.raises(OptimisticLockError):
+                await backend.extend_lease(job, worker, ttl_s=1, expected_version=999)
+        assert "Version mismatch on extend_lease" in caplog.text
+
+    asyncio.run(_run())
+
+
+def test_sql_backend_finish_conflict_raises_optimistic_lock_error(caplog) -> None:
+    async def _run() -> None:
+        backend = _make_backend()
+        when = datetime.now(timezone.utc) - timedelta(seconds=1)
+        job = await backend.enqueue(kind="alpha", payload={}, priority=1, scheduled_for=when)
+        worker = uuid4()
+        rows = await backend.claim_batch(worker, limit=1)
+        expected_version = rows[0]["version"] + 1
+
+        await backend.succeed(job, {"ok": True}, expected_version=expected_version)
+        with caplog.at_level(logging.WARNING):
+            with pytest.raises(OptimisticLockError):
+                await backend.fail(job, {"error": "late"}, expected_version=expected_version)
+        assert "Version mismatch on finish" in caplog.text
 
     asyncio.run(_run())
 
