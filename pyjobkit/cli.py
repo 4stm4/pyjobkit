@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import importlib
 import logging
+from contextlib import suppress
 import sys
 from typing import Callable
 
@@ -75,6 +76,8 @@ def _load_executor(dotted_path: str):
 
 async def _run_worker(args: argparse.Namespace) -> None:
     _configure_logging(args.log_level)
+    worker: Worker | None = None
+    stopped = False
     try:
         engine = create_async_engine(args.dsn)
     except SQLAlchemyError as exc:
@@ -102,10 +105,20 @@ async def _run_worker(args: argparse.Namespace) -> None:
         except asyncio.CancelledError:
             worker.request_stop()
             await worker.wait_stopped()
+            stopped = True
+            raise
+        except KeyboardInterrupt:
+            worker.request_stop()
+            await worker.wait_stopped()
+            stopped = True
             raise
         except Exception as exc:
             raise CLIError(f"Worker terminated with an unexpected error: {exc}") from exc
     finally:
+        if worker is not None and not stopped:
+            worker.request_stop()
+            with suppress(Exception):
+                await worker.wait_stopped()
         await engine.dispose()
 
 

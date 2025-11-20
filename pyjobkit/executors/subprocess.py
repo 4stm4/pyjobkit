@@ -43,7 +43,12 @@ class SubprocessExecutor(Executor):
                 if stream is None:
                     return
                 while True:
-                    chunk = await stream.readline()
+                    try:
+                        chunk = await asyncio.wait_for(stream.readline(), timeout=1)
+                    except asyncio.TimeoutError:
+                        if proc and proc.returncode is None:
+                            continue
+                        break
                     if not chunk:
                         break
                     await ctx.log(chunk.decode(errors="ignore"), stream=name)

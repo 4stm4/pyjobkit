@@ -135,11 +135,24 @@ class Worker:
         ctx = self.engine.make_ctx(job_id)
         expected_version = row.get("version")
         lease_task = asyncio.create_task(self._extend_loop(job_id, expected_version))
+        cancel_task: asyncio.Task[None] | None = None
         try:
             await self.engine.mark_running(job_id, self.worker_id)
             timeout = row.get("timeout_s") or 300
+            exec_task = asyncio.create_task(
+                executor.run(job_id=job_id, payload=row["payload"], ctx=ctx)
+            )
+
+            async def _watch_cancel() -> None:
+                while True:
+                    await asyncio.sleep(self.poll_interval)
+                    if await ctx.is_cancelled():
+                        exec_task.cancel()
+                        return
+
+            cancel_task = asyncio.create_task(_watch_cancel())
             async with asyncio.timeout(timeout):
-                result = await executor.run(job_id=job_id, payload=row["payload"], ctx=ctx)
+                result = await exec_task
             await self.engine.succeed(job_id, result, expected_version=expected_version)
         except asyncio.TimeoutError:
             await self.engine.timeout(job_id, expected_version=expected_version)
@@ -153,6 +166,10 @@ class Worker:
             else:
                 await self.engine.retry(job_id, delay=2**(attempts - 1))
         finally:
+            if cancel_task:
+                cancel_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await asyncio.shield(cancel_task)
             lease_task.cancel()
             with suppress(asyncio.CancelledError):
                 await asyncio.shield(lease_task)
@@ -196,36 +213,33 @@ class Worker:
         except asyncio.CancelledError:
             return
 
-    async def _drain(self) -> None:
-        self._stop.set()
-        for task in list(self._tasks):
-            task.cancel()
-        if self._tasks:
-            results = await asyncio.gather(*self._tasks, return_exceptions=True)
-            for result in results:
-                if isinstance(result, Exception) and not isinstance(
-                    result, asyncio.CancelledError
-                ):
-                    logger.warning("Task raised during shutdown: %s", result, exc_info=result)
-        await self._active_jobs_zero.wait()
-
     async def _wait_for_drain(self) -> None:
-        drain_task = asyncio.create_task(self._drain())
+        self._stop.set()
         try:
             if self.stop_timeout is None:
-                await asyncio.shield(drain_task)
-            else:
-                await asyncio.wait_for(asyncio.shield(drain_task), timeout=self.stop_timeout)
+                await self._active_jobs_zero.wait()
+                return
+            await asyncio.wait_for(self._active_jobs_zero.wait(), timeout=self.stop_timeout)
         except asyncio.TimeoutError:
             logger.error(
                 "Worker shutdown timed out after %.2fs; %d tasks may still be running",
                 self.stop_timeout,
                 len(self._tasks),
             )
+            for task in list(self._tasks):
+                task.cancel()
+            if self._tasks:
+                results = await asyncio.gather(*self._tasks, return_exceptions=True)
+                for result in results:
+                    if isinstance(result, Exception) and not isinstance(
+                        result, asyncio.CancelledError
+                    ):
+                        logger.warning(
+                            "Task raised during shutdown: %s", result, exc_info=result
+                        )
         finally:
-            drain_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await asyncio.shield(drain_task)
+            if not self._active_jobs_zero.is_set():
+                await self._active_jobs_zero.wait()
 
     async def check_health(self) -> dict[str, Any]:
         try:
