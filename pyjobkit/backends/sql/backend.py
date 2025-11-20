@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import logging
 from typing import Any, Iterable, List
 from uuid import UUID, uuid4
 
@@ -13,6 +14,7 @@ from .schema import JobTasks
 from ...contracts import QueueBackend
 
 UTC = timezone.utc
+logger = logging.getLogger(__name__)
 
 
 class SQLBackend(QueueBackend):
@@ -27,6 +29,7 @@ class SQLBackend(QueueBackend):
         self.prefer_pg_skip_locked = prefer_pg_skip_locked
         self.lease_ttl_s = lease_ttl_s
         self.sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+        self._warned_about_skip_locked = False
 
     def __repr__(self) -> str:  # pragma: no cover - debugging helper
         return (
@@ -98,6 +101,11 @@ class SQLBackend(QueueBackend):
         if self.engine.dialect.name == "postgresql" and self.prefer_pg_skip_locked:
             rows = await self._claim_pg(worker_id, limit)
         else:
+            if not getattr(self, "_warned_about_skip_locked", False):
+                logger.warning(
+                    "Running without SKIP LOCKED; concurrent workers may double-claim jobs"
+                )
+                self._warned_about_skip_locked = True
             rows = await self._claim_generic(worker_id, limit)
         return [self._row_to_dict(row) for row in rows]
 
