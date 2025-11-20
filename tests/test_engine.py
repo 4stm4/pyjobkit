@@ -3,19 +3,23 @@
 from __future__ import annotations
 
 import asyncio
-from uuid import uuid4
+import logging
+from uuid import UUID, uuid4
+
+import pytest
 
 from pyjobkit.backends.memory import MemoryBackend
-from pyjobkit.engine import Engine
+from pyjobkit.engine import DefaultExecContext, Engine
+from pyjobkit.contracts import ExecContext, Executor
 
 
-class _RecorderExecutor:
+class _RecorderExecutor(Executor):
     kind = "demo"
 
     def __init__(self) -> None:
         self.calls: list[tuple] = []
 
-    async def run(self, *, job_id, payload: dict, ctx):  # type: ignore[override]
+    async def run(self, *, job_id: UUID, payload: dict, ctx: ExecContext) -> dict:
         await ctx.log(f"running {payload['value']}")
         await ctx.set_progress(0.5, step="half")
         result = {"echo": payload, "job": str(job_id)}
@@ -35,6 +39,7 @@ async def _exercise_engine() -> None:
     await engine.cancel(job_id)
     cancelled = await engine.get(job_id)
     assert cancelled["cancel_requested"] is True
+    assert cancelled["status"] == "cancelled"
 
     # Execution context plumbing uses the configured log sink and event bus.
     ctx = engine.make_ctx(job_id)
@@ -79,3 +84,105 @@ def test_engine_make_ctx_is_isolated() -> None:
         assert [entry.message for entry in logs_b] == ["b"]
 
     asyncio.run(_run())
+
+
+def test_engine_rejects_duplicate_executor_kinds() -> None:
+    class _Executor:
+        kind = "duplicate"
+
+    backend = MemoryBackend()
+    with pytest.raises(ValueError):
+        Engine(backend=backend, executors=[_Executor(), _Executor()])
+
+
+def test_engine_register_executor_runtime() -> None:
+    backend = MemoryBackend()
+    engine = Engine(backend=backend, executors=[])
+
+    executor = _RecorderExecutor()
+    engine.register_executor(executor)
+
+    assert engine.executor_for("demo") is executor
+
+
+def test_engine_register_executor_rejects_conflicts() -> None:
+    backend = MemoryBackend()
+    engine = Engine(backend=backend, executors=[_RecorderExecutor()])
+
+    with pytest.raises(ValueError):
+        engine.register_executor(_RecorderExecutor())
+
+
+def test_engine_register_executor_validates_kind_characters() -> None:
+    class _BadExecutor(Executor):
+        kind = "bad kind"
+
+        async def run(self, *, job_id: UUID, payload: dict, ctx: ExecContext) -> dict:
+            return {}
+
+    backend = MemoryBackend()
+    engine = Engine(backend=backend, executors=[])
+
+    with pytest.raises(ValueError):
+        engine.register_executor(_BadExecutor())
+
+
+def test_engine_accepts_custom_exec_context_factory() -> None:
+    async def _run() -> None:
+        created: list[tuple] = []
+
+        class _CustomCtx(DefaultExecContext):
+            async def log(self, message: str, /, *, stream: str = "stdout") -> None:
+                created.append((self.job_id, stream, message))
+                await super().log(message, stream=stream)
+
+        def _factory(*args, **kwargs):
+            return _CustomCtx(*args, **kwargs)
+
+        backend = MemoryBackend()
+        engine = Engine(backend=backend, executors=[], exec_context_factory=_factory)
+        job_id = uuid4()
+        ctx = engine.make_ctx(job_id)
+        await ctx.log("custom")
+        assert created == [(job_id, "stdout", "custom")]
+
+    asyncio.run(_run())
+
+
+def test_engine_logs_enqueue_and_cancel(caplog) -> None:
+    async def _run() -> None:
+        backend = MemoryBackend()
+        engine = Engine(backend=backend, executors=[])
+
+        caplog.set_level(logging.INFO, logger="pyjobkit.engine")
+
+        job_id = await engine.enqueue(kind="demo", payload={"value": 1})
+        await engine.cancel(job_id)
+
+    asyncio.run(_run())
+
+    messages = [record.message for record in caplog.records]
+    assert any("enqueue requested" in message for message in messages)
+    assert any("enqueue accepted" in message for message in messages)
+    assert any("cancel requested" in message for message in messages)
+
+
+def test_engine_logs_capacity_timeout(caplog) -> None:
+    async def _run() -> None:
+        backend = MemoryBackend()
+        engine = Engine(
+            backend=backend,
+            executors=[],
+            max_queue_size=0,
+            enqueue_timeout_s=0,
+        )
+
+        caplog.set_level(logging.ERROR, logger="pyjobkit.engine")
+
+        with pytest.raises(TimeoutError):
+            await engine.enqueue(kind="demo", payload={})
+
+    asyncio.run(_run())
+
+    messages = [record.message for record in caplog.records]
+    assert any("timed out waiting for queue capacity" in message for message in messages)

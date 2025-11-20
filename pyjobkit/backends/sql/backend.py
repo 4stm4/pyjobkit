@@ -2,19 +2,26 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable, List
+import logging
+from time import perf_counter
+from typing import Any, Awaitable, Callable, Iterable, List
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
+from sqlalchemy.exc import DBAPIError
 
 from .schema import JobTasks
+from ...contracts import OptimisticLockError, QueueBackend
+from ... import metrics
 
 UTC = timezone.utc
+logger = logging.getLogger(__name__)
 
 
-class SQLBackend:
+class SQLBackend(QueueBackend):
     def __init__(
         self,
         engine: AsyncEngine,
@@ -26,6 +33,7 @@ class SQLBackend:
         self.prefer_pg_skip_locked = prefer_pg_skip_locked
         self.lease_ttl_s = lease_ttl_s
         self.sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+        self._warned_about_skip_locked = False
 
     def __repr__(self) -> str:  # pragma: no cover - debugging helper
         return (
@@ -36,27 +44,37 @@ class SQLBackend:
             ")"
         )
 
-    async def enqueue(self, **kwargs):  # type: ignore[override]
+    async def enqueue(
+        self,
+        *,
+        kind: str,
+        payload: dict,
+        priority: int = 100,
+        scheduled_for: datetime | None = None,
+        max_attempts: int = 3,
+        idempotency_key: str | None = None,
+        timeout_s: int | None = None,
+    ) -> UUID:
         job_id = uuid4()
         now = datetime.now(UTC)
         values = dict(
             id=str(job_id),
             status="queued",
             created_at=now,
-            scheduled_for=kwargs.get("scheduled_for") or now,
-            max_attempts=kwargs.get("max_attempts", 3),
-            priority=kwargs.get("priority", 100),
-            kind=kwargs["kind"],
-            payload=kwargs.get("payload", {}),
-            idempotency_key=kwargs.get("idempotency_key"),
-            timeout_s=kwargs.get("timeout_s"),
+            scheduled_for=scheduled_for or now,
+            max_attempts=max_attempts,
+            priority=priority,
+            kind=kind,
+            payload=payload,
+            idempotency_key=idempotency_key,
+            timeout_s=timeout_s,
         )
         async with self.sessionmaker() as session:
             await session.execute(JobTasks.insert().values(**values))
             await session.commit()
         return job_id
 
-    async def get(self, job_id: UUID) -> dict:  # type: ignore[override]
+    async def get(self, job_id: UUID) -> dict:
         async with self.sessionmaker() as session:
             row = (
                 await session.execute(select(JobTasks).where(JobTasks.c.id == str(job_id)))
@@ -65,14 +83,28 @@ class SQLBackend:
                 raise KeyError(job_id)
             return self._row_to_dict(row)
 
-    async def cancel(self, job_id: UUID) -> None:  # type: ignore[override]
+    async def cancel(self, job_id: UUID) -> None:
         async with self.sessionmaker() as session:
             await session.execute(
                 update(JobTasks).where(JobTasks.c.id == str(job_id)).values(cancel_requested=True)
             )
+            await session.execute(
+                update(JobTasks)
+                .where(JobTasks.c.id == str(job_id))
+                .where(JobTasks.c.status.in_(["queued", "running"]))
+                .values(
+                    cancel_requested=True,
+                    status="cancelled",
+                    finished_at=datetime.now(UTC),
+                    result={"error": "cancelled"},
+                    lease_until=None,
+                    leased_by=None,
+                    version=JobTasks.c.version + 1,
+                )
+            )
             await session.commit()
 
-    async def is_cancelled(self, job_id: UUID) -> bool:  # type: ignore[override]
+    async def is_cancelled(self, job_id: UUID) -> bool:
         async with self.sessionmaker() as session:
             row = (
                 await session.execute(
@@ -81,10 +113,17 @@ class SQLBackend:
             ).first()
             return bool(row and row.cancel_requested)
 
-    async def claim_batch(self, worker_id: UUID, *, limit: int = 1) -> List[dict]:  # type: ignore[override]
+    async def claim_batch(
+        self, worker_id: UUID, *, limit: int = 1
+    ) -> List[QueueBackend.ClaimedJob]:
         if self.engine.dialect.name == "postgresql" and self.prefer_pg_skip_locked:
             rows = await self._claim_pg(worker_id, limit)
         else:
+            if not getattr(self, "_warned_about_skip_locked", False):
+                logger.warning(
+                    "Running without SKIP LOCKED; concurrent workers may double-claim jobs"
+                )
+                self._warned_about_skip_locked = True
             rows = await self._claim_generic(worker_id, limit)
         return [self._row_to_dict(row) for row in rows]
 
@@ -155,7 +194,7 @@ class SQLBackend:
                     await session.rollback()
             return picked
 
-    async def mark_running(self, job_id: UUID, worker_id: UUID) -> None:  # type: ignore[override]
+    async def mark_running(self, job_id: UUID, worker_id: UUID) -> None:
         async with self.sessionmaker() as session:
             await session.execute(
                 update(JobTasks)
@@ -175,38 +214,64 @@ class SQLBackend:
         ttl_s: int,
         *,
         expected_version: int | None = None,
-    ) -> None:  # type: ignore[override]
-        async with self.sessionmaker() as session:
-            stmt = (
-                update(JobTasks)
-                .where(JobTasks.c.id == str(job_id))
-                .where(JobTasks.c.leased_by == str(worker_id))
+    ) -> None:
+        start = perf_counter()
+
+        async def _op() -> None:
+            async with self.sessionmaker() as session:
+                try:
+                    stmt = (
+                        update(JobTasks)
+                        .where(JobTasks.c.id == str(job_id))
+                        .where(JobTasks.c.leased_by == str(worker_id))
+                    )
+                    if expected_version is not None:
+                        stmt = stmt.where(JobTasks.c.version == expected_version)
+                    res = await session.execute(
+                        stmt.values(lease_until=datetime.now(UTC) + timedelta(seconds=ttl_s))
+                    )
+                    if expected_version is not None and res.rowcount == 0:
+                        raise OptimisticLockError(
+                            f"extend_lease failed for {job_id} due to version mismatch"
+                        )
+                    await session.commit()
+                except Exception:
+                    await session.rollback()
+                    raise
+
+        try:
+            await self._retry_with_backoff(_op)
+        except OptimisticLockError:
+            metrics.extend_lease_conflicts.inc()
+            logger.warning(
+                "Version mismatch on extend_lease for job %s by worker %s (expected_version=%s)",
+                job_id,
+                worker_id,
+                expected_version,
             )
-            if expected_version is not None:
-                stmt = stmt.where(JobTasks.c.version == expected_version)
-            await session.execute(
-                stmt.values(lease_until=datetime.now(UTC) + timedelta(seconds=ttl_s))
-            )
-            await session.commit()
+            raise
+        finally:
+            metrics.extend_lease_latency.observe(perf_counter() - start)
+            metrics.lease_ttl_seconds.observe(ttl_s)
 
     async def succeed(
         self, job_id: UUID, result: dict, *, expected_version: int | None = None
-    ) -> None:  # type: ignore[override]
+    ) -> None:
         await self._finish(job_id, "success", result, expected_version=expected_version)
 
     async def fail(
         self, job_id: UUID, reason: dict, *, expected_version: int | None = None
-    ) -> None:  # type: ignore[override]
+    ) -> None:
         await self._finish(job_id, "failed", reason, expected_version=expected_version)
 
     async def timeout(
         self, job_id: UUID, *, expected_version: int | None = None
-    ) -> None:  # type: ignore[override]
+    ) -> None:
         await self._finish(
             job_id, "timeout", {"error": "timeout"}, expected_version=expected_version
         )
 
-    async def retry(self, job_id: UUID, *, delay: float) -> None:  # type: ignore[override]
+    async def retry(self, job_id: UUID, *, delay: float) -> None:
         retry_at = datetime.now(UTC) + timedelta(seconds=delay)
         async with self.sessionmaker() as session:
             await session.execute(
@@ -223,7 +288,7 @@ class SQLBackend:
             )
             await session.commit()
 
-    async def reap_expired(self) -> int:  # type: ignore[override]
+    async def reap_expired(self) -> int:
         now = datetime.now(UTC)
         async with self.sessionmaker() as session:
             expired_rows = (
@@ -256,7 +321,7 @@ class SQLBackend:
             await session.commit()
             return updated
 
-    async def queue_depth(self) -> int:  # type: ignore[override]
+    async def queue_depth(self) -> int:
         async with self.sessionmaker() as session:
             result = await session.execute(
                 select(func.count()).select_from(
@@ -269,28 +334,76 @@ class SQLBackend:
             count = result.scalar()
             return int(count or 0)
 
-    async def check_connection(self) -> None:  # type: ignore[override]
+    async def check_connection(self) -> None:
         async with self.engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
 
     async def _finish(
         self, job_id: UUID, status: str, result: dict, *, expected_version: int | None
     ) -> None:
-        async with self.sessionmaker() as session:
-            stmt = update(JobTasks).where(JobTasks.c.id == str(job_id))
-            if expected_version is not None:
-                stmt = stmt.where(JobTasks.c.version == expected_version)
-            await session.execute(
-                stmt.values(
-                    status=status,
-                    finished_at=datetime.now(UTC),
-                    result=result,
-                    lease_until=None,
-                    leased_by=None,
-                    version=JobTasks.c.version + 1,
-                )
+        async def _op() -> None:
+            async with self.sessionmaker() as session:
+                try:
+                    stmt = update(JobTasks).where(JobTasks.c.id == str(job_id))
+                    if expected_version is not None:
+                        stmt = stmt.where(JobTasks.c.version == expected_version)
+                    res = await session.execute(
+                        stmt.values(
+                            status=status,
+                            finished_at=datetime.now(UTC),
+                            result=result,
+                            lease_until=None,
+                            leased_by=None,
+                            version=JobTasks.c.version + 1,
+                        )
+                    )
+                    if expected_version is not None and res.rowcount == 0:
+                        raise OptimisticLockError(
+                            f"finish failed for {job_id} due to version mismatch"
+                        )
+                    await session.commit()
+                except Exception:
+                    await session.rollback()
+                    raise
+
+        try:
+            await self._retry_with_backoff(_op)
+        except OptimisticLockError:
+            logger.warning(
+                "Version mismatch on finish for job %s (expected_version=%s)",
+                job_id,
+                expected_version,
             )
-            await session.commit()
+            raise
+
+    async def _retry_with_backoff(
+        self,
+        func: Callable[[], Awaitable[Any]],
+        *,
+        attempts: int = 3,
+        base_delay: float = 0.1,
+        max_delay: float = 2.0,
+    ) -> Any:
+        delay = base_delay
+        last_exc: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                return await func()
+            except (DBAPIError, ConnectionError) as exc:
+                last_exc = exc
+                if attempt == attempts:
+                    raise
+                logger.warning(
+                    "Transient backend error on attempt %s/%s; retrying in %.2fs",
+                    attempt,
+                    attempts,
+                    delay,
+                    exc_info=exc,
+                )
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, max_delay)
+        if last_exc:
+            raise last_exc
 
     @staticmethod
     def _row_to_dict(row: Any) -> dict:

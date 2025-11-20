@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import UUID, uuid4
@@ -12,6 +13,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from pyjobkit.backends.sql.backend import SQLBackend
+from pyjobkit.contracts import OptimisticLockError
 from pyjobkit.backends.sql.schema import metadata
 
 
@@ -44,6 +46,10 @@ def _make_backend() -> SQLBackend:
     backend.prefer_pg_skip_locked = False
     backend.lease_ttl_s = 1
     backend.sessionmaker = lambda: _AsyncSessionWrapper(SyncSession())
+    # Ensure SQLite connections are properly disposed to avoid resource warnings.
+    import weakref
+
+    weakref.finalize(backend, sync_engine.dispose)
     return backend
 
 
@@ -56,21 +62,23 @@ def test_sql_backend_end_to_end() -> None:
         await backend.cancel(job_a)
         cancelled = await backend.get(job_a)
         assert cancelled["cancel_requested"] is True
+        assert cancelled["status"] == "cancelled"
 
         worker_id = uuid4()
         rows = await backend.claim_batch(worker_id, limit=2)
-        assert [row["payload"]["idx"] for row in rows] == [2, 1]
+        assert [row["payload"]["idx"] for row in rows] == [2]
 
         await backend.mark_running(rows[0]["id"], worker_id)
         await backend.extend_lease(rows[0]["id"], worker_id, ttl_s=2)
         await backend.succeed(rows[0]["id"], {"ok": True})
-        await backend.fail(rows[1]["id"], {"error": "nope"})
+        failing_job = await backend.enqueue(kind="alpha", payload={"idx": 3}, scheduled_for=when)
+        await backend.fail(failing_job, {"error": "nope"})
 
         extra = await backend.enqueue(kind="alpha", payload={}, scheduled_for=when)
         await backend.timeout(extra)
 
         success = await backend.get(rows[0]["id"])
-        failed = await backend.get(rows[1]["id"])
+        failed = await backend.get(failing_job)
         timed = await backend.get(extra)
         assert success["status"] == "success"
         assert failed["status"] == "failed"
@@ -122,6 +130,41 @@ def test_sql_backend_claim_batch_prefers_pg(monkeypatch) -> None:
         rows = await backend.claim_batch(uuid4(), limit=2)
         assert len(rows) == 1
         assert called[0][1] == 2
+
+    asyncio.run(_run())
+
+
+def test_sql_backend_extend_lease_version_mismatch(caplog) -> None:
+    async def _run() -> None:
+        backend = _make_backend()
+        when = datetime.now(timezone.utc) - timedelta(seconds=1)
+        job = await backend.enqueue(kind="alpha", payload={}, priority=1, scheduled_for=when)
+        worker = uuid4()
+        rows = await backend.claim_batch(worker, limit=1)
+        assert rows and rows[0]["id"] == job
+
+        with caplog.at_level(logging.WARNING):
+            with pytest.raises(OptimisticLockError):
+                await backend.extend_lease(job, worker, ttl_s=1, expected_version=999)
+        assert "Version mismatch on extend_lease" in caplog.text
+
+    asyncio.run(_run())
+
+
+def test_sql_backend_finish_conflict_raises_optimistic_lock_error(caplog) -> None:
+    async def _run() -> None:
+        backend = _make_backend()
+        when = datetime.now(timezone.utc) - timedelta(seconds=1)
+        job = await backend.enqueue(kind="alpha", payload={}, priority=1, scheduled_for=when)
+        worker = uuid4()
+        rows = await backend.claim_batch(worker, limit=1)
+        expected_version = rows[0]["version"] + 1
+
+        await backend.succeed(job, {"ok": True}, expected_version=expected_version)
+        with caplog.at_level(logging.WARNING):
+            with pytest.raises(OptimisticLockError):
+                await backend.fail(job, {"error": "late"}, expected_version=expected_version)
+        assert "Version mismatch on finish" in caplog.text
 
     asyncio.run(_run())
 

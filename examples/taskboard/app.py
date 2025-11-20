@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse
 from pyjobkit import Engine, Worker
 from pyjobkit.backends.memory import MemoryBackend
 from pyjobkit.contracts import ExecContext, Executor
+from uuid import UUID
 
 
 class InspectableMemoryBackend(MemoryBackend):
@@ -27,7 +28,7 @@ class InspectableMemoryBackend(MemoryBackend):
 class DemoSleepExecutor(Executor):
     kind = "demo.sleep"
 
-    async def run(self, *, job_id, payload, ctx: ExecContext):  # type: ignore[override]
+    async def run(self, *, job_id: UUID, payload: dict, ctx: ExecContext) -> dict:
         label = payload.get("label", str(job_id))
         duration = float(payload.get("duration", random.uniform(1.0, 4.0)))
         steps = 5
