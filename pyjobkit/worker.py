@@ -118,7 +118,10 @@ class Worker:
         except asyncio.CancelledError:
             raise
         finally:
-            await self._wait_for_drain()
+            try:
+                await self._wait_for_drain()
+            finally:
+                self._stopped.set()
 
     async def _run_row(self, row: dict[str, Any]) -> None:
         try:
@@ -168,12 +171,21 @@ class Worker:
             with suppress(asyncio.CancelledError):
                 await lease_watch
             result = await exec_task
+            if await ctx.is_cancelled():
+                logger.info("Job %s completed after cancellation request", job_id)
+                await self.engine.cancel(job_id)
+                return
             await self.engine.succeed(job_id, result, expected_version=expected_version)
         except asyncio.TimeoutError:
             exec_task.cancel()
             with suppress(asyncio.CancelledError):
                 await exec_task
-            await self.engine.timeout(job_id, expected_version=expected_version)
+            attempts = (row.get("attempts") or 0) + 1
+            max_attempts = row.get("max_attempts", 3)
+            if attempts >= max_attempts:
+                await self.engine.timeout(job_id, expected_version=expected_version)
+            else:
+                await self.engine.retry(job_id, delay=2**(attempts - 1))
         except LeaseLostError:
             logger.info("Lease lost for job %s; abandoning result", job_id)
             return
