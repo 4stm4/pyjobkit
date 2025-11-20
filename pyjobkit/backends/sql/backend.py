@@ -11,7 +11,7 @@ from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from .schema import JobTasks
-from ...contracts import QueueBackend
+from ...contracts import OptimisticLockError, QueueBackend
 
 UTC = timezone.utc
 logger = logging.getLogger(__name__)
@@ -205,9 +205,14 @@ class SQLBackend(QueueBackend):
             )
             if expected_version is not None:
                 stmt = stmt.where(JobTasks.c.version == expected_version)
-            await session.execute(
+            res = await session.execute(
                 stmt.values(lease_until=datetime.now(UTC) + timedelta(seconds=ttl_s))
             )
+            if expected_version is not None and res.rowcount == 0:
+                await session.rollback()
+                raise OptimisticLockError(
+                    f"extend_lease failed for {job_id} due to version mismatch"
+                )
             await session.commit()
 
     async def succeed(
@@ -301,7 +306,7 @@ class SQLBackend(QueueBackend):
             stmt = update(JobTasks).where(JobTasks.c.id == str(job_id))
             if expected_version is not None:
                 stmt = stmt.where(JobTasks.c.version == expected_version)
-            await session.execute(
+            res = await session.execute(
                 stmt.values(
                     status=status,
                     finished_at=datetime.now(UTC),
@@ -311,6 +316,11 @@ class SQLBackend(QueueBackend):
                     version=JobTasks.c.version + 1,
                 )
             )
+            if expected_version is not None and res.rowcount == 0:
+                await session.rollback()
+                raise OptimisticLockError(
+                    f"finish failed for {job_id} due to version mismatch"
+                )
             await session.commit()
 
     @staticmethod

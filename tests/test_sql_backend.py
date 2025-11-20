@@ -12,6 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from pyjobkit.backends.sql.backend import SQLBackend
+from pyjobkit.contracts import OptimisticLockError
 from pyjobkit.backends.sql.schema import metadata
 
 
@@ -122,6 +123,21 @@ def test_sql_backend_claim_batch_prefers_pg(monkeypatch) -> None:
         rows = await backend.claim_batch(uuid4(), limit=2)
         assert len(rows) == 1
         assert called[0][1] == 2
+
+    asyncio.run(_run())
+
+
+def test_sql_backend_extend_lease_version_mismatch() -> None:
+    async def _run() -> None:
+        backend = _make_backend()
+        when = datetime.now(timezone.utc) - timedelta(seconds=1)
+        job = await backend.enqueue(kind="alpha", payload={}, priority=1, scheduled_for=when)
+        worker = uuid4()
+        rows = await backend.claim_batch(worker, limit=1)
+        assert rows and rows[0]["id"] == job
+
+        with pytest.raises(OptimisticLockError):
+            await backend.extend_lease(job, worker, ttl_s=1, expected_version=999)
 
     asyncio.run(_run())
 

@@ -16,9 +16,14 @@ from contextlib import suppress
 from typing import Any
 from uuid import UUID, uuid4
 
+from .contracts import OptimisticLockError
 from .engine import Engine
 
 logger = logging.getLogger(__name__)
+
+
+class LeaseLostError(RuntimeError):
+    """Raised when a worker loses its lease for a job."""
 
 
 class Worker:
@@ -130,7 +135,10 @@ class Worker:
             return
         ctx = self.engine.make_ctx(job_id)
         expected_version = row.get("version")
-        lease_task = asyncio.create_task(self._extend_loop(job_id, expected_version))
+        lease_lost = asyncio.Event()
+        lease_task = asyncio.create_task(
+            self._extend_loop(job_id, expected_version, lease_lost)
+        )
         cancel_task: asyncio.Task[None] | None = None
         try:
             await self.engine.mark_running(job_id, self.worker_id)
@@ -138,6 +146,8 @@ class Worker:
             exec_task = asyncio.create_task(
                 executor.run(job_id=job_id, payload=row["payload"], ctx=ctx)
             )
+
+            lease_watch = asyncio.create_task(lease_lost.wait())
 
             async def _watch_cancel() -> None:
                 while True:
@@ -148,13 +158,28 @@ class Worker:
 
             cancel_task = asyncio.create_task(_watch_cancel())
             async with asyncio.timeout(timeout):
-                result = await exec_task
+                done, _ = await asyncio.wait(
+                    {exec_task, lease_watch}, return_when=asyncio.FIRST_COMPLETED
+                )
+            if lease_watch in done:
+                exec_task.cancel()
+                raise LeaseLostError(job_id)
+            lease_watch.cancel()
+            with suppress(asyncio.CancelledError):
+                await lease_watch
+            result = await exec_task
             await self.engine.succeed(job_id, result, expected_version=expected_version)
         except asyncio.TimeoutError:
             await self.engine.timeout(job_id, expected_version=expected_version)
+        except LeaseLostError:
+            logger.info("Lease lost for job %s; abandoning result", job_id)
+            return
         except asyncio.CancelledError:
             logger.info("Job %s cancelled during execution", job_id)
             await self.engine.cancel(job_id)
+            return
+        except OptimisticLockError as exc:
+            logger.info("Optimistic lock failed for job %s: %s", job_id, exc)
             return
         except Exception as exc:  # pragma: no cover - defensive
             attempts = (row.get("attempts") or 0) + 1
@@ -163,6 +188,10 @@ class Worker:
             else:
                 await self.engine.retry(job_id, delay=2**(attempts - 1))
         finally:
+            if "lease_watch" in locals():
+                lease_watch.cancel()
+                with suppress(asyncio.CancelledError):
+                    await lease_watch
             if cancel_task:
                 cancel_task.cancel()
                 with suppress(asyncio.CancelledError):
@@ -171,7 +200,9 @@ class Worker:
             with suppress(asyncio.CancelledError):
                 await asyncio.shield(lease_task)
 
-    async def _extend_loop(self, job_id: UUID, expected_version: int | None) -> None:
+    async def _extend_loop(
+        self, job_id: UUID, expected_version: int | None, lease_lost: asyncio.Event
+    ) -> None:
         interval = self.lease_ttl * 0.5
         try:
             while True:
@@ -185,6 +216,10 @@ class Worker:
                     )
                 except asyncio.CancelledError:
                     raise
+                except OptimisticLockError:
+                    lease_lost.set()
+                    logger.info("Lost lease while extending job %s; stopping", job_id)
+                    return
                 except Exception as exc:  # pragma: no cover - defensive logging
                     logger.warning(
                         "extend_lease failed for job %s; retrying", job_id, exc_info=exc
