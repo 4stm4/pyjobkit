@@ -84,16 +84,22 @@ class SubprocessExecutor(Executor):
             if not cancelled:
                 current = asyncio.current_task()
                 cancelled = bool(current and current.cancelled())
+            cleanup_cancelled = False
             if proc and proc.returncode is None:
                 reason = "cancelled" if cancelled else "error"
                 await _safe_log(f"terminating process ({reason})", stream="stderr")
                 proc.terminate()
                 try:
-                    await asyncio.wait_for(proc.wait(), timeout=3)
+                    await asyncio.wait_for(asyncio.shield(proc.wait()), timeout=3)
                 except asyncio.TimeoutError:
                     await _safe_log(
                         "process unresponsive to SIGTERM; sending SIGKILL", stream="stderr"
                     )
+                    proc.kill()
+                    with suppress(asyncio.CancelledError):
+                        await proc.wait()
+                except asyncio.CancelledError:
+                    cleanup_cancelled = True
                     proc.kill()
                     with suppress(asyncio.CancelledError):
                         await proc.wait()
@@ -112,3 +118,5 @@ class SubprocessExecutor(Executor):
                 await _safe_log(
                     f"process exited with code {proc.returncode}", stream="stderr"
                 )
+            if cleanup_cancelled:
+                raise asyncio.CancelledError

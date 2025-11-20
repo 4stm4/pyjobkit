@@ -266,6 +266,32 @@ def test_worker_execute_timeout() -> None:
         executor = _Executor(kind="slow", behavior=slow)
         worker = Worker(_Engine(backend, [executor]), lease_ttl=1)
         await worker._execute_row({"id": uuid4(), "kind": "slow", "payload": {}, "timeout_s": 0.01})
+        assert backend.retried
+        assert not backend.timed_out
+
+    asyncio.run(_run())
+
+
+def test_worker_execute_timeout_exhausts_attempts() -> None:
+    async def _run() -> None:
+        backend = _Backend()
+
+        async def slow(job_id, payload, ctx):
+            await asyncio.sleep(0.05)
+            return {"ok": False}
+
+        executor = _Executor(kind="slow", behavior=slow)
+        worker = Worker(_Engine(backend, [executor]), lease_ttl=1)
+        await worker._execute_row(
+            {
+                "id": uuid4(),
+                "kind": "slow",
+                "payload": {},
+                "timeout_s": 0.01,
+                "attempts": 2,
+                "max_attempts": 2,
+            }
+        )
         assert backend.timed_out
 
     asyncio.run(_run())
