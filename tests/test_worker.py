@@ -48,6 +48,7 @@ class _Backend(QueueBackend):
         self.marked: list[UUID] = []
         self.succeeded: list[tuple[UUID, dict, int | None]] = []
         self.failed: list[tuple[UUID, dict, int | None]] = []
+        self.cancelled: list[UUID] = []
         self.timed_out: list[tuple[UUID, int | None]] = []
         self.retried: list[tuple[UUID, float]] = []
         self.extended: list[UUID] = []
@@ -71,7 +72,7 @@ class _Backend(QueueBackend):
         raise NotImplementedError
 
     async def cancel(self, job_id: UUID) -> None:
-        raise NotImplementedError
+        self.cancelled.append(job_id)
 
     async def is_cancelled(self, job_id: UUID) -> bool:
         return False
@@ -177,6 +178,9 @@ class _Engine:
 
     async def fail(self, job_id: UUID, reason: dict, *, expected_version: int | None = None) -> None:
         await self.backend.fail(job_id, reason, expected_version=expected_version)
+
+    async def cancel(self, job_id: UUID) -> None:
+        await self.backend.cancel(job_id)
 
     async def timeout(self, job_id: UUID, *, expected_version: int | None = None) -> None:
         await self.backend.timeout(job_id, expected_version=expected_version)
@@ -305,7 +309,7 @@ def test_worker_kills_subprocess_on_timeout(tmp_path) -> None:
     asyncio.run(_run())
 
 
-def test_worker_execute_cancelled_error() -> None:
+def test_worker_execute_cancelled_error(caplog: pytest.LogCaptureFixture) -> None:
     async def _run() -> None:
         backend = _Backend()
 
@@ -314,8 +318,15 @@ def test_worker_execute_cancelled_error() -> None:
 
         executor = _Executor(kind="boom", behavior=cancelled)
         worker = Worker(_Engine(backend, [executor]))
-        await worker._execute_row({"id": uuid4(), "kind": "boom", "payload": {}})
-        assert backend.failed[0][1] == {"error": "cancelled"}
+        job_id = uuid4()
+        with caplog.at_level(logging.INFO):
+            await worker._execute_row({"id": job_id, "kind": "boom", "payload": {}})
+        assert backend.cancelled == [backend.marked[0]]
+        assert backend.failed == []
+        assert any(
+            "Job %s cancelled during execution" % job_id in record.message
+            for record in caplog.records
+        )
 
     asyncio.run(_run())
 
