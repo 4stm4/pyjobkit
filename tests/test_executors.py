@@ -54,7 +54,7 @@ def _patch_http_client(monkeypatch, responses: List[object]) -> None:
 
         async def request(self, *args, **kwargs):
             resp = self._responses.pop(0)
-            if isinstance(resp, Exception):
+            if isinstance(resp, BaseException):
                 raise resp
             return resp
 
@@ -99,6 +99,31 @@ def test_http_executor_retries_and_fails(monkeypatch) -> None:
         _patch_http_client(monkeypatch, [RuntimeError("nope")])
         with pytest.raises(RuntimeError):
             await executor.run(job_id=uuid4(), payload={"url": "https://example"}, ctx=ctx)
+
+    asyncio.run(_run())
+
+
+def test_http_executor_propagates_cancel(monkeypatch) -> None:
+    async def _run() -> None:
+        _patch_http_client(monkeypatch, [asyncio.CancelledError()])
+
+        sleep_calls: list[float] = []
+
+        async def fake_sleep(duration: float) -> None:
+            sleep_calls.append(duration)
+
+        monkeypatch.setattr("pyjobkit.executors.http.asyncio.sleep", fake_sleep)
+        ctx = TestContext()
+        executor = HttpExecutor()
+
+        with pytest.raises(asyncio.CancelledError):
+            await executor.run(
+                job_id=uuid4(),
+                payload={"url": "https://example", "retries": 2, "backoff": 0.1},
+                ctx=ctx,
+            )
+
+        assert sleep_calls == []
 
     asyncio.run(_run())
 

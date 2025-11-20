@@ -48,6 +48,9 @@ class HttpExecutor(Executor):
                         "body": body,
                         "duration_ms": duration,
                     }
+                except asyncio.CancelledError:
+                    # Propagate cancellation without retrying so that jobs stop promptly.
+                    raise
                 except Exception as exc:
                     if attempt >= retries:
                         await ctx.log(f"http executor failed: {exc}", stream="stderr")
