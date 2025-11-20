@@ -1,6 +1,7 @@
 # Pyjobkit
 
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://pypi.org/project/pyjobkit/)
+[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](https://pypi.org/project/pyjobkit/)
+[![Git tag](https://img.shields.io/badge/tag-v0.2.0-brightgreen.svg)](https://github.com/4stm4/pyjobkit/tree/v0.2.0)
 [![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/4stm4/99574c3e4a5b6f3890c375bde7e1f0cd/raw/coverage-summary.json)](https://github.com/4stm4/pyjobkit/actions)
 [![Python Version](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/downloads/release/python-3130/)
 
