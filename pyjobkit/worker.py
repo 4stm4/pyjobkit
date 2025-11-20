@@ -111,13 +111,9 @@ class Worker:
                         self._tasks.add(task)
                         task.add_done_callback(self._tasks.discard)
         except asyncio.CancelledError:
-            self._stop.set()
             raise
         finally:
-            try:
-                await self._wait_for_drain()
-            finally:
-                self._stopped.set()
+            await self._wait_for_drain()
 
     async def _run_row(self, row: dict[str, Any]) -> None:
         try:
@@ -157,7 +153,8 @@ class Worker:
         except asyncio.TimeoutError:
             await self.engine.timeout(job_id, expected_version=expected_version)
         except asyncio.CancelledError:
-            await self.engine.fail(job_id, {"error": "cancelled"}, expected_version=expected_version)
+            logger.info("Job %s cancelled during execution", job_id)
+            await self.engine.cancel(job_id)
             return
         except Exception as exc:  # pragma: no cover - defensive
             attempts = (row.get("attempts") or 0) + 1
@@ -211,7 +208,8 @@ class Worker:
                             exc_info=True,
                         )
         except asyncio.CancelledError:
-            return
+            logger.info("reap loop cancelled; shutting down")
+            raise
 
     async def _wait_for_drain(self) -> None:
         self._stop.set()
@@ -228,18 +226,26 @@ class Worker:
             )
             for task in list(self._tasks):
                 task.cancel()
-            if self._tasks:
-                results = await asyncio.gather(*self._tasks, return_exceptions=True)
-                for result in results:
-                    if isinstance(result, Exception) and not isinstance(
-                        result, asyncio.CancelledError
-                    ):
-                        logger.warning(
-                            "Task raised during shutdown: %s", result, exc_info=result
-                        )
         finally:
-            if not self._active_jobs_zero.is_set():
-                await self._active_jobs_zero.wait()
+            try:
+                if self._tasks:
+                    results = await asyncio.gather(
+                        *self._tasks, return_exceptions=True
+                    )
+                    for result in results:
+                        if isinstance(result, asyncio.CancelledError):
+                            logger.info("Task cancelled during shutdown")
+                            continue
+                        if isinstance(result, Exception):
+                            logger.warning(
+                                "Task raised during shutdown: %s",
+                                result,
+                                exc_info=result,
+                            )
+            finally:
+                if not self._active_jobs_zero.is_set():
+                    await self._active_jobs_zero.wait()
+                self._stopped.set()
 
     async def check_health(self) -> dict[str, Any]:
         try:
