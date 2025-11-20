@@ -62,21 +62,23 @@ def test_sql_backend_end_to_end() -> None:
         await backend.cancel(job_a)
         cancelled = await backend.get(job_a)
         assert cancelled["cancel_requested"] is True
+        assert cancelled["status"] == "cancelled"
 
         worker_id = uuid4()
         rows = await backend.claim_batch(worker_id, limit=2)
-        assert [row["payload"]["idx"] for row in rows] == [2, 1]
+        assert [row["payload"]["idx"] for row in rows] == [2]
 
         await backend.mark_running(rows[0]["id"], worker_id)
         await backend.extend_lease(rows[0]["id"], worker_id, ttl_s=2)
         await backend.succeed(rows[0]["id"], {"ok": True})
-        await backend.fail(rows[1]["id"], {"error": "nope"})
+        failing_job = await backend.enqueue(kind="alpha", payload={"idx": 3}, scheduled_for=when)
+        await backend.fail(failing_job, {"error": "nope"})
 
         extra = await backend.enqueue(kind="alpha", payload={}, scheduled_for=when)
         await backend.timeout(extra)
 
         success = await backend.get(rows[0]["id"])
-        failed = await backend.get(rows[1]["id"])
+        failed = await backend.get(failing_job)
         timed = await backend.get(extra)
         assert success["status"] == "success"
         assert failed["status"] == "failed"
