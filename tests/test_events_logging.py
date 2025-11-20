@@ -44,3 +44,20 @@ def test_memory_log_sink_enforces_capacity() -> None:
         assert await sink.get(uuid4()) == []
 
     asyncio.run(_run())
+
+
+def test_memory_log_sink_handles_missing_event_loop(monkeypatch) -> None:
+    async def _run() -> None:
+        sink = MemoryLogSink(max_items=1)
+        job_id = uuid4()
+        await sink.write(LogRecord(job_id, "stdout", "offline"))
+
+        def _raise() -> None:
+            raise RuntimeError("no loop")
+
+        monkeypatch.setattr("pyjobkit.logging.memory.asyncio.get_running_loop", _raise)
+
+        logs = await sink.get(job_id)
+        assert [entry.message for entry in logs] == ["offline"]
+
+    asyncio.run(_run())
