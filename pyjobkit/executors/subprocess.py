@@ -21,6 +21,14 @@ class SubprocessExecutor(Executor):
         shell = isinstance(cmd, str)
         start = time.perf_counter()
         proc: asyncio.subprocess.Process | None = None
+        pump_tasks: list[asyncio.Task[None]] = []
+        cancelled = False
+        logged_return_code = False
+
+        async def _safe_log(message: str, /, *, stream: str = "stdout") -> None:
+            with suppress(Exception):
+                await ctx.log(message, stream=stream)
+
         try:
             if shell:
                 proc = await asyncio.create_subprocess_shell(
@@ -51,25 +59,56 @@ class SubprocessExecutor(Executor):
                         break
                     if not chunk:
                         break
-                    await ctx.log(chunk.decode(errors="ignore"), stream=name)
+                    await _safe_log(chunk.decode(errors="ignore"), stream=name)
 
-            async with asyncio.TaskGroup() as tg:
-                tg.create_task(_pump(proc.stdout, "stdout"))
-                tg.create_task(_pump(proc.stderr, "stderr"))
+            if proc.stdout is not None:
+                pump_tasks.append(asyncio.create_task(_pump(proc.stdout, "stdout")))
+            if proc.stderr is not None:
+                pump_tasks.append(asyncio.create_task(_pump(proc.stderr, "stderr")))
             rc = await proc.wait()
+            if rc != 0:
+                await _safe_log(f"process exited with code {rc}", stream="stderr")
+                logged_return_code = True
+            for t in pump_tasks:
+                t.cancel()
+            with suppress(asyncio.CancelledError):
+                await asyncio.gather(*pump_tasks)
             return {
                 "returncode": rc,
                 "duration_ms": int((time.perf_counter() - start) * 1000),
             }
         except asyncio.CancelledError:
-            if proc and proc.returncode is None:
-                proc.kill()
-                with suppress(asyncio.CancelledError):
-                    await proc.wait()
+            cancelled = True
             raise
-        except Exception:
+        finally:
+            if not cancelled:
+                current = asyncio.current_task()
+                cancelled = bool(current and current.cancelled())
             if proc and proc.returncode is None:
-                proc.kill()
+                reason = "cancelled" if cancelled else "error"
+                await _safe_log(f"terminating process ({reason})", stream="stderr")
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=3)
+                except asyncio.TimeoutError:
+                    await _safe_log(
+                        "process unresponsive to SIGTERM; sending SIGKILL", stream="stderr"
+                    )
+                    proc.kill()
+                    with suppress(asyncio.CancelledError):
+                        await proc.wait()
+            for t in pump_tasks:
+                if not t.done():
+                    t.cancel()
+            if pump_tasks:
                 with suppress(asyncio.CancelledError):
-                    await proc.wait()
-            raise
+                    await asyncio.gather(*pump_tasks)
+            if (
+                proc
+                and proc.returncode is not None
+                and proc.returncode != 0
+                and not logged_return_code
+            ):
+                await _safe_log(
+                    f"process exited with code {proc.returncode}", stream="stderr"
+                )

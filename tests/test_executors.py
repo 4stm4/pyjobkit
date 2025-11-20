@@ -168,4 +168,70 @@ def test_subprocess_executor_cancels_process(tmp_path) -> None:
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
 
+        assert any("terminating process" in message for _, message in ctx.logs)
+        pump_tasks = [t for t in asyncio.all_tasks() if t.get_coro().__name__ == "_pump"]
+        assert pump_tasks == []
+
+    asyncio.run(_run())
+
+
+def test_subprocess_executor_times_out_and_kills(tmp_path) -> None:
+    async def _run() -> None:
+        pid_file = tmp_path / "child_timeout.pid"
+        ctx = TestContext()
+        executor = SubprocessExecutor()
+
+        async def _long_running() -> dict:
+            return await executor.run(
+                job_id=uuid4(),
+                payload={
+                    "cmd": [
+                        "python3",
+                        "-c",
+                        (
+                            "import os, time, pathlib; "
+                            f"pathlib.Path('{pid_file}').write_text(str(os.getpid())); "
+                            "time.sleep(10)"
+                        ),
+                    ]
+                },
+                ctx=ctx,
+            )
+
+        with pytest.raises(asyncio.TimeoutError):
+            async with asyncio.timeout(0.2):
+                await _long_running()
+
+        for _ in range(20):
+            if pid_file.exists():
+                break
+            await asyncio.sleep(0.01)
+        else:
+            pytest.fail("child pid file not created")
+
+        pid = int(pid_file.read_text())
+        await asyncio.sleep(0.05)
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+
+        assert any("terminating process" in message for _, message in ctx.logs)
+        pump_tasks = [t for t in asyncio.all_tasks() if t.get_coro().__name__ == "_pump"]
+        assert pump_tasks == []
+
+    asyncio.run(_run())
+
+
+def test_subprocess_executor_logs_nonzero_exit() -> None:
+    async def _run() -> None:
+        ctx = TestContext()
+        executor = SubprocessExecutor()
+        result = await executor.run(
+            job_id=uuid4(),
+            payload={"cmd": ["python3", "-c", "import sys; sys.exit(3)"]},
+            ctx=ctx,
+        )
+
+        assert result["returncode"] == 3
+        assert ("stderr", "process exited with code 3") in ctx.logs
+
     asyncio.run(_run())
