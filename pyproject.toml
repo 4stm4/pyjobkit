@@ -2,6 +2,7 @@
 name = "pyjobkit"
 version = "0.2.0"
 description = "Backend-agnostic job processing toolkit"
+readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "sqlalchemy[asyncio]>=2.0",
