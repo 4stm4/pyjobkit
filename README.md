@@ -16,8 +16,7 @@ Pyjobkit is a backend-agnostic toolkit for building reliable asynchronous job pr
 
 ## Installation
 ```bash
-# install from source
-pip install -e .
+pip install pyjobkit
 ```
 
 Optional extras for async database drivers (install manually):
