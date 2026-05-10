@@ -1,0 +1,99 @@
+{
+  "Pyjobkit: enqueue a job": {
+    "scope": "python",
+    "prefix": ["pjk-enqueue", "pjkenqueue"],
+    "description": "Enqueue a job through an Engine instance",
+    "body": [
+      "job_id = await ${1:engine}.enqueue(",
+      "    kind=\"${2:subprocess}\",",
+      "    payload={\"${3:cmd}\": \"${4:echo hello}\"},",
+      "    priority=${5:100},",
+      "    max_attempts=${6:3},",
+      "    timeout_s=${7:None},",
+      "    idempotency_key=${8:None},",
+      ")$0"
+    ]
+  },
+  "Pyjobkit: Engine + SQLBackend setup": {
+    "scope": "python",
+    "prefix": ["pjk-engine", "pjkengine"],
+    "description": "Construct an Engine wired to a SQLBackend",
+    "body": [
+      "from sqlalchemy.ext.asyncio import create_async_engine",
+      "from pyjobkit import Engine",
+      "from pyjobkit.backends.sql import SQLBackend",
+      "from pyjobkit.executors import HttpExecutor, SubprocessExecutor",
+      "",
+      "db = create_async_engine(\"${1:postgresql+asyncpg://user:pass@host/db}\")",
+      "backend = SQLBackend(db)",
+      "${2:engine} = Engine(",
+      "    backend=backend,",
+      "    executors=[SubprocessExecutor(), HttpExecutor()],",
+      ")$0"
+    ]
+  },
+  "Pyjobkit: custom Executor skeleton": {
+    "scope": "python",
+    "prefix": ["pjk-executor", "pjkexecutor"],
+    "description": "Skeleton for a custom Executor implementing the protocol",
+    "body": [
+      "from pyjobkit.contracts import ExecContext, Executor",
+      "",
+      "",
+      "class ${1:MyExecutor}(Executor):",
+      "    kind = \"${2:my_kind}\"",
+      "",
+      "    async def execute(self, ctx: ExecContext, payload: dict) -> dict:",
+      "        await ctx.log(\"starting ${2:my_kind}\")",
+      "        # ${3:do work here}",
+      "        await ctx.set_progress(1.0)",
+      "        return {\"ok\": True}$0"
+    ]
+  },
+  "Pyjobkit: Worker.run() loop": {
+    "scope": "python",
+    "prefix": ["pjk-worker", "pjkworker"],
+    "description": "Construct and run a Worker against an Engine",
+    "body": [
+      "from pyjobkit import Worker",
+      "",
+      "worker = Worker(",
+      "    ${1:engine},",
+      "    max_concurrency=${2:8},",
+      "    batch=${3:1},",
+      "    poll_interval=${4:0.5},",
+      "    lease_ttl=${5:30},",
+      ")",
+      "await worker.run()$0"
+    ]
+  },
+  "Pyjobkit: load_config()": {
+    "scope": "python",
+    "prefix": ["pjk-config", "pjkconfig"],
+    "description": "Load Pyjobkit configuration from TOML / environment",
+    "body": [
+      "from pyjobkit import load_config",
+      "",
+      "${1:cfg} = load_config(",
+      "    config_path=${2:None},",
+      "    overrides={\"dsn\": \"${3:sqlite+aiosqlite:///jobs.db}\"},",
+      ")$0"
+    ]
+  },
+  "Pyjobkit: .pyjobkit.toml template": {
+    "scope": "toml",
+    "prefix": ["pjk-toml", "pjkconfig"],
+    "description": "Starter .pyjobkit.toml configuration",
+    "body": [
+      "[pyjobkit]",
+      "dsn = \"${1:postgresql+asyncpg://user:pass@host/db}\"",
+      "poll_interval = ${2:0.5}",
+      "max_attempts = ${3:3}",
+      "concurrency = ${4:8}",
+      "batch = ${5:1}",
+      "lease_ttl = ${6:30}",
+      "log_level = \"${7:INFO}\"",
+      "$0"
+    ]
+  }
+}
