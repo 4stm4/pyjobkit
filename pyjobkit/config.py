@@ -45,6 +45,7 @@ class Config:
     log_level: str = "INFO"
     log_format: str = "text"
     retry_policy: str = "exponential:1:2"
+    watchdog_interval_s: float | None = None
     disable_skip_locked: bool = False
     extra_executors: tuple[str, ...] = field(default_factory=tuple)
 
@@ -137,6 +138,10 @@ def _normalize_key(key: str) -> str | None:
 
 def _coerce_value(key: str, value: Any) -> Any:
     if key == "poll_interval":
+        return _coerce_float(value, key)
+    if key == "watchdog_interval_s":
+        if value is None or value == "":
+            return None
         return _coerce_float(value, key)
     if key in {"max_attempts", "concurrency", "batch", "lease_ttl"}:
         return _coerce_int(value, key)

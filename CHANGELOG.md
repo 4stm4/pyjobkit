@@ -1,6 +1,13 @@
 
 ## Unreleased
 
+* **Configurable watchdog interval** (closes #72)
+  `Worker` now accepts `watchdog_interval_s` (CLI `--watchdog-interval`,
+  config `watchdog_interval_s`); when omitted it falls back to the
+  previous behaviour of running every `lease_ttl` seconds. The reap loop
+  emits a structured `watchdog.reaped` event whenever it reclaims one or
+  more expired leases.
+
 * **In-memory backend polish** (closes #68)
   `MemoryBackend` is now re-exported as `pyjobkit.MemoryBackend` with a
   documented "tests / prototyping / debug" status. Added `count(status=...)`,

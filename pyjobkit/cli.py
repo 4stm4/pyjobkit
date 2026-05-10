@@ -100,6 +100,8 @@ def _resolve_config(args: argparse.Namespace) -> Config:
         overrides["log_format"] = args.log_format
     if args.retry_policy is not None:
         overrides["retry_policy"] = args.retry_policy
+    if args.watchdog_interval is not None:
+        overrides["watchdog_interval_s"] = args.watchdog_interval
     if args.executor:
         overrides["extra_executors"] = tuple(args.executor)
 
@@ -143,6 +145,7 @@ async def _run_worker(args: argparse.Namespace) -> None:
             poll_interval=config.poll_interval,
             lease_ttl=config.lease_ttl,
             retry_policy=config.retry_policy,
+            watchdog_interval_s=config.watchdog_interval_s,
         )
         try:
             await worker.run()
@@ -221,6 +224,15 @@ def main() -> None:
         help=(
             "Default retry policy spec, e.g. 'exponential:1:2', "
             "'exponential_jitter:1:2:30:0.1', or 'fixed:5'"
+        ),
+    )
+    parser.add_argument(
+        "--watchdog-interval",
+        type=_positive_float("watchdog-interval"),
+        default=None,
+        help=(
+            "Seconds between watchdog sweeps for expired leases "
+            "(defaults to --lease-ttl)"
         ),
     )
     args = parser.parse_args()

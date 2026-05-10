@@ -45,6 +45,7 @@ class Worker:
         queue_capacity: int | None = None,
         stop_timeout: float | None = 60,
         retry_policy: RetryPolicy | str | None = None,
+        watchdog_interval_s: float | None = None,
     ) -> None:
         self.engine = engine
         self.max_concurrency = max_concurrency
@@ -53,6 +54,13 @@ class Worker:
         self.lease_ttl = lease_ttl
         self.queue_capacity = queue_capacity
         self.stop_timeout = stop_timeout
+        if watchdog_interval_s is not None and watchdog_interval_s <= 0:
+            raise ValueError("watchdog_interval_s must be > 0")
+        self.watchdog_interval_s = (
+            float(watchdog_interval_s)
+            if watchdog_interval_s is not None
+            else float(lease_ttl)
+        )
         if retry_policy is None:
             self.retry_policy: RetryPolicy = DEFAULT_RETRY_POLICY
         elif isinstance(retry_policy, RetryPolicy):
@@ -399,11 +407,22 @@ class Worker:
         try:
             while True:
                 try:
-                    await asyncio.wait_for(self._stop.wait(), timeout=self.lease_ttl)
+                    await asyncio.wait_for(
+                        self._stop.wait(), timeout=self.watchdog_interval_s
+                    )
                     return
                 except asyncio.TimeoutError:
                     try:
-                        await self.engine.reap_expired()
+                        reaped = await self.engine.reap_expired()
+                        if reaped:
+                            logger.info(
+                                "watchdog reaped expired jobs",
+                                extra={
+                                    "event": "watchdog.reaped",
+                                    "worker_id": str(self.worker_id),
+                                    "count": reaped,
+                                },
+                            )
                     except Exception as exc:
                         logger.warning(
                             "reap_expired failed, continuing to retry: %s",
