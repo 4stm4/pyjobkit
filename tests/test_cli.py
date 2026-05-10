@@ -117,6 +117,7 @@ def test_run_worker_builds_components(monkeypatch) -> None:
             log_format=None,
             retry_policy=None,
             watchdog_interval=None,
+            enable_plugins=False,
         )
         await cli._run_worker(args)
         assert created["dsn"] == "sqlite://"
@@ -286,6 +287,7 @@ def test_run_worker_requests_stop_on_cancel(monkeypatch) -> None:
             log_format=None,
             retry_policy=None,
             watchdog_interval=None,
+            enable_plugins=False,
         )
         with pytest.raises(asyncio.CancelledError):
             await cli._run_worker(args)

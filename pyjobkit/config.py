@@ -47,6 +47,7 @@ class Config:
     retry_policy: str = "exponential:1:2"
     watchdog_interval_s: float | None = None
     disable_skip_locked: bool = False
+    enable_plugins: bool = False
     extra_executors: tuple[str, ...] = field(default_factory=tuple)
 
     def as_dict(self) -> dict[str, Any]:
@@ -145,7 +146,7 @@ def _coerce_value(key: str, value: Any) -> Any:
         return _coerce_float(value, key)
     if key in {"max_attempts", "concurrency", "batch", "lease_ttl"}:
         return _coerce_int(value, key)
-    if key == "disable_skip_locked":
+    if key in {"disable_skip_locked", "enable_plugins"}:
         return _coerce_bool(value, key)
     if key == "log_level":
         return _coerce_log_level(value)

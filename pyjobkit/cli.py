@@ -21,6 +21,9 @@ from .logging import configure_logging
 from .worker import Worker
 
 
+logger = logging.getLogger(__name__)
+
+
 class CLIError(RuntimeError):
     """Raised when the CLI fails to start or configure the worker."""
 
@@ -94,6 +97,8 @@ def _resolve_config(args: argparse.Namespace) -> Config:
         overrides["default_executor"] = args.default_executor
     if args.disable_skip_locked:
         overrides["disable_skip_locked"] = True
+    if args.enable_plugins:
+        overrides["enable_plugins"] = True
     if args.log_level is not None:
         overrides["log_level"] = args.log_level
     if args.log_format is not None:
@@ -138,6 +143,14 @@ async def _run_worker(args: argparse.Namespace) -> None:
         for dotted_path in config.extra_executors:
             executors.append(_load_executor(dotted_path))
         eng = Engine(backend=backend, executors=executors)
+        if config.enable_plugins:
+            registered = eng.register_plugins()
+            if registered:
+                logger.info(
+                    "Loaded %d executor plugin(s): %s",
+                    len(registered),
+                    ", ".join(sorted(e.kind for e in registered)),
+                )
         worker = Worker(
             eng,
             max_concurrency=config.concurrency,
@@ -205,6 +218,11 @@ def main() -> None:
         "--executor",
         action="append",
         help="Additional executor in the form 'module:attr' to register with the worker",
+    )
+    parser.add_argument(
+        "--enable-plugins",
+        action="store_true",
+        help="Discover and register executors from 'pyjobkit.executors' entry points",
     )
     parser.add_argument(
         "--log-level",

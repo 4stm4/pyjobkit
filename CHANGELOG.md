@@ -1,6 +1,13 @@
 
 ## Unreleased
 
+* **Entry-point plugin discovery** (closes #51)
+  Third-party packages may register executor factories under the
+  `pyjobkit.executors` entry-point group. `Engine.register_plugins()`
+  loads them on demand; the worker CLI exposes `--enable-plugins` (and
+  config `enable_plugins`) for opt-in automatic discovery. Plugins that
+  fail to import or return a non-Executor are skipped with a warning.
+
 * **Delayed scheduling helpers** (closes #57)
   Added `Engine.enqueue_at(when=...)` and `Engine.enqueue_in(delay)` as
   ergonomic wrappers over the existing `scheduled_for` parameter.

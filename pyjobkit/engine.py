@@ -252,6 +252,30 @@ class Engine:
     def executor_for(self, kind: str) -> Executor | None:
         return self.executors.get(kind)
 
+    def register_plugins(
+        self, *, only: Iterable[str] | None = None
+    ) -> list[Executor]:
+        """Discover and register executors advertised via entry points.
+
+        Already-registered ``kind`` values are kept; conflicting plugins
+        are skipped with a warning. Returns the list of newly registered
+        instances.
+        """
+
+        from .executors.plugins import discover_executors
+
+        registered: list[Executor] = []
+        for executor in discover_executors(only=only):
+            if executor.kind in self.executors:
+                logger.warning(
+                    "skipping plugin executor for kind %r: already registered",
+                    executor.kind,
+                )
+                continue
+            self.register_executor(executor)
+            registered.append(executor)
+        return registered
+
     def register_executor(self, executor: Executor) -> None:
         """Register a new executor at runtime.
 
