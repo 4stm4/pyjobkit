@@ -1,4 +1,12 @@
 
+## Unreleased
+
+* **TOML / environment configuration** (closes #46)
+  New `pyjobkit.config` module loads settings from `.pyjobkit.toml` and
+  `PYJOBKIT_*` environment variables. The worker CLI now accepts `--config`,
+  `--max-attempts`, and `--default-executor`; `--dsn` may be omitted when
+  provided via config or env. Resolution order: CLI → env → TOML → defaults.
+
 ##  Pyjobkit 0.2.0 – Stable Production Release
 
 ###  Major Improvements

@@ -96,6 +96,34 @@ pyjobkit --dsn postgresql+asyncpg://user:pass@host/db \
 
 Use `--disable-skip-locked` when targeting databases that do not support the Postgres-specific optimization. The CLI wires in the SQL backend plus the HTTP and subprocess executors, so jobs with `kind="http"` or `kind="subprocess"` will run out of the box.
 
+### Configuration via TOML / environment
+
+CLI flags can be replaced (or supplemented) by a `.pyjobkit.toml` file in the working directory or by `PYJOBKIT_*` environment variables. Resolution order is **CLI flags → environment → TOML file → defaults**.
+
+```toml
+# .pyjobkit.toml
+[pyjobkit]
+dsn = "postgresql+asyncpg://user:pass@host/db"   # alias: db_url
+poll_interval = 0.5
+max_attempts = 3
+default_executor = "myapp.executors:make_redis"
+concurrency = 8
+batch = 1
+lease_ttl = 30
+log_level = "INFO"
+disable_skip_locked = false
+extra_executors = ["myapp.executors:make_celery"]
+```
+
+```bash
+export PYJOBKIT_DSN=postgresql+asyncpg://user:pass@host/db
+export PYJOBKIT_POLL_INTERVAL=1.0
+pyjobkit               # uses env + ./.pyjobkit.toml
+pyjobkit --config /etc/pyjobkit.toml
+```
+
+The same loader is exposed programmatically as `pyjobkit.load_config()` / `pyjobkit.Config`.
+
 ## Extending Pyjobkit
 - **Custom executors** – Implement the `Executor` protocol, register instances when constructing the `Engine`, and leverage the `ExecContext` helpers (`log`, `set_progress`, `is_cancelled`).
 - **Alternate backends** – Implement the `QueueBackend` protocol to target message brokers or proprietary queues while reusing the worker and executor layers.

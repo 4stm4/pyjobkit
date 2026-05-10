@@ -73,13 +73,32 @@ def test_run_worker_builds_components(monkeypatch) -> None:
         monkeypatch.setattr(cli, "Worker", FakeWorker)
         monkeypatch.setattr(cli, "SubprocessExecutor", DummyExecutor)
         monkeypatch.setattr(cli, "HttpExecutor", DummyExecutor)
+        monkeypatch.setattr(
+            cli,
+            "load_config",
+            lambda **kwargs: cli.Config(
+                dsn=kwargs["overrides"].get("dsn"),
+                concurrency=kwargs["overrides"].get("concurrency", 8),
+                batch=kwargs["overrides"].get("batch", 1),
+                poll_interval=kwargs["overrides"].get("poll_interval", 0.5),
+                lease_ttl=kwargs["overrides"].get("lease_ttl", 30),
+                disable_skip_locked=kwargs["overrides"].get(
+                    "disable_skip_locked", False
+                ),
+                log_level=kwargs["overrides"].get("log_level", "INFO"),
+                extra_executors=kwargs["overrides"].get("extra_executors", ()),
+            ),
+        )
 
         args = argparse.Namespace(
+            config=None,
             dsn="sqlite://",
             concurrency=3,
             batch=2,
             poll_interval=0.1,
             lease_ttl=5,
+            max_attempts=None,
+            default_executor=None,
             disable_skip_locked=True,
             executor=None,
             log_level="INFO",
@@ -221,13 +240,21 @@ def test_run_worker_requests_stop_on_cancel(monkeypatch) -> None:
         monkeypatch.setattr(cli, "Worker", FakeWorker)
         monkeypatch.setattr(cli, "SubprocessExecutor", DummyExecutor)
         monkeypatch.setattr(cli, "HttpExecutor", DummyExecutor)
+        monkeypatch.setattr(
+            cli,
+            "load_config",
+            lambda **kwargs: cli.Config(dsn=kwargs["overrides"].get("dsn")),
+        )
 
         args = argparse.Namespace(
+            config=None,
             dsn="sqlite://",
             concurrency=1,
             batch=1,
             poll_interval=0.1,
             lease_ttl=5,
+            max_attempts=None,
+            default_executor=None,
             disable_skip_locked=False,
             executor=None,
             log_level="INFO",
