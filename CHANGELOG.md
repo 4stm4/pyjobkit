@@ -1,6 +1,15 @@
 
 ## Unreleased
 
+* **Executor phase profiling** (closes #74)
+  `ExecContext.profile_phase("setup")` is an async context manager that
+  measures the wall-clock duration of an executor phase, observes it in
+  the new `pyjobkit_phase_duration_seconds` Prometheus histogram, and
+  emits structured `phase.started` / `phase.ended` log events with
+  `duration_ms`. A human-readable summary is also forwarded to the
+  job's log sink. Exceptions inside the block propagate; the phase is
+  still recorded with an `error` annotation.
+
 * **Entry-point plugin discovery** (closes #51)
   Third-party packages may register executor factories under the
   `pyjobkit.executors` entry-point group. `Engine.register_plugins()`

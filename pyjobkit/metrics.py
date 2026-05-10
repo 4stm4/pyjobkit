@@ -42,3 +42,9 @@ lease_ttl_seconds = Histogram(
     "Observed TTL values requested when extending leases.",
 )
 
+
+phase_duration_seconds = Histogram(
+    "pyjobkit_phase_duration_seconds",
+    "Duration of executor phases instrumented via ctx.profile_phase().",
+)
+

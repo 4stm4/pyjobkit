@@ -8,11 +8,16 @@ would otherwise be enforced only by optional type checking tools.
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, TypedDict
+from time import perf_counter
+from typing import Any, AsyncIterator, TypedDict
 from uuid import UUID
+
+_logger = logging.getLogger(__name__)
 
 
 class ExecContext(ABC):
@@ -39,6 +44,67 @@ class ExecContext(ABC):
     @abstractmethod
     async def set_progress(self, value: float, /, **meta: Any) -> None:
         """Publish a progress update with optional metadata."""
+
+    @asynccontextmanager
+    async def profile_phase(
+        self, name: str, /, **meta: Any
+    ) -> AsyncIterator[None]:
+        """Measure the wall-clock duration of an executor phase.
+
+        Example::
+
+            async with ctx.profile_phase("setup"):
+                await prepare_inputs()
+            async with ctx.profile_phase("execute"):
+                result = await call_external_api()
+
+        On entry the context manager emits a ``phase.started`` log event
+        with the phase name; on exit it emits ``phase.ended`` carrying
+        ``duration_ms`` and any keyword metadata, observes the duration in
+        the ``pyjobkit_phase_duration_seconds`` Prometheus histogram, and
+        forwards a human-readable summary to :meth:`log` so it also shows
+        up next to the job's regular log lines. Exceptions raised inside
+        the ``with`` block propagate; the phase is still recorded with an
+        ``error`` annotation.
+        """
+
+        from . import metrics
+
+        job_id = getattr(self, "job_id", None)
+        start = perf_counter()
+        base_extra: dict[str, Any] = {
+            "event": "phase.started",
+            "phase": name,
+            "job_id": str(job_id) if job_id is not None else None,
+            **meta,
+        }
+        _logger.info("phase started", extra=base_extra)
+        error: BaseException | None = None
+        try:
+            yield
+        except BaseException as exc:
+            error = exc
+            raise
+        finally:
+            duration_s = perf_counter() - start
+            metrics.phase_duration_seconds.observe(duration_s)
+            end_extra: dict[str, Any] = {
+                "event": "phase.ended",
+                "phase": name,
+                "job_id": str(job_id) if job_id is not None else None,
+                "duration_ms": round(duration_s * 1000, 3),
+                **meta,
+            }
+            if error is not None:
+                end_extra["error"] = type(error).__name__
+            _logger.info("phase ended", extra=end_extra)
+            try:
+                await self.log(
+                    f"phase {name} took {duration_s * 1000:.1f}ms"
+                    + (f" (error: {type(error).__name__})" if error else "")
+                )
+            except Exception:  # pragma: no cover - defensive
+                pass
 
 
 class Executor(ABC):
