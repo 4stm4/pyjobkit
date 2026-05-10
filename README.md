@@ -113,6 +113,7 @@ lease_ttl = 30
 log_level = "INFO"
 disable_skip_locked = false
 extra_executors = ["myapp.executors:make_celery"]
+log_format = "json"  # 'text' (default) or 'json' for structured logs
 ```
 
 ```bash

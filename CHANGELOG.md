@@ -7,6 +7,26 @@
   `--max-attempts`, and `--default-executor`; `--dsn` may be omitted when
   provided via config or env. Resolution order: CLI → env → TOML → defaults.
 
+* **VSCode workspace** (closes #67)
+  Added `.vscode/` with snippets (enqueue, Engine, custom Executor,
+  Worker loop, `load_config`, `.pyjobkit.toml`), pytest settings, debug
+  launch configs, and recommended extensions.
+
+* **Public typed API** (closes #48)
+  New `pyjobkit.types` module exposes `JobStatus` / `LogStream` literals
+  plus `JobRecord` / `JobResult` / `FailureReason` TypedDicts. A `py.typed`
+  marker ships in the wheel so external type checkers honor the inline
+  annotations (PEP 561).
+
+* **Structured JSON logs** (closes #45)
+  New `pyjobkit.logging.JsonFormatter` plus `configure_logging(level, fmt=...)`
+  helper. The worker CLI gains `--log-format` (and config key `log_format`)
+  to switch between `text` and `json`. The worker emits structured
+  state-change events (`job.started`, `job.succeeded`, `job.failed`,
+  `job.timeout`, `job.retry`, `job.cancelled`, `job.lease_lost`,
+  `job.lock_conflict`) with `job_id`, `worker_id`, `status`, and
+  `duration_ms` fields.
+
 ##  Pyjobkit 0.2.0 – Stable Production Release
 
 ###  Major Improvements

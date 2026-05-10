@@ -24,6 +24,7 @@ _TRUTHY = {"1", "true", "yes", "on"}
 _FALSY = {"0", "false", "no", "off"}
 
 LOG_LEVELS = ("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG")
+LOG_FORMATS = ("text", "json")
 
 
 class ConfigError(ValueError):
@@ -42,6 +43,7 @@ class Config:
     batch: int = 1
     lease_ttl: int = 30
     log_level: str = "INFO"
+    log_format: str = "text"
     disable_skip_locked: bool = False
     extra_executors: tuple[str, ...] = field(default_factory=tuple)
 
@@ -99,6 +101,17 @@ def _coerce_log_level(value: Any) -> str:
     return upper
 
 
+def _coerce_log_format(value: Any) -> str:
+    if not isinstance(value, str):
+        raise ConfigError(f"'log_format' must be a string (got {value!r})")
+    lower = value.strip().lower()
+    if lower not in LOG_FORMATS:
+        raise ConfigError(
+            f"'log_format' must be one of {LOG_FORMATS} (got {value!r})"
+        )
+    return lower
+
+
 def _coerce_executors(value: Any) -> tuple[str, ...]:
     if value is None:
         return ()
@@ -130,6 +143,8 @@ def _coerce_value(key: str, value: Any) -> Any:
         return _coerce_bool(value, key)
     if key == "log_level":
         return _coerce_log_level(value)
+    if key == "log_format":
+        return _coerce_log_format(value)
     if key == "extra_executors":
         return _coerce_executors(value)
     if key in {"dsn", "default_executor"}:

@@ -14,9 +14,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from .backends.sql import SQLBackend
-from .config import Config, ConfigError, LOG_LEVELS, load_config
+from .config import Config, ConfigError, LOG_FORMATS, LOG_LEVELS, load_config
 from .engine import Engine
 from .executors import HttpExecutor, SubprocessExecutor
+from .logging import configure_logging
 from .worker import Worker
 
 
@@ -50,11 +51,11 @@ def _positive_float(name: str) -> Callable[[str], float]:
     return _validate
 
 
-def _configure_logging(level_name: str) -> None:
-    numeric = logging.getLevelName(level_name.upper())
-    if not isinstance(numeric, int):  # pragma: no cover - guarded by argparse choices
-        raise CLIError(f"Unknown log level: {level_name}")
-    logging.basicConfig(level=numeric, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+def _configure_logging(level_name: str, fmt: str = "text") -> None:
+    try:
+        configure_logging(level_name, fmt=fmt)
+    except ValueError as exc:
+        raise CLIError(str(exc)) from exc
 
 
 def _load_executor(dotted_path: str):
@@ -95,6 +96,8 @@ def _resolve_config(args: argparse.Namespace) -> Config:
         overrides["disable_skip_locked"] = True
     if args.log_level is not None:
         overrides["log_level"] = args.log_level
+    if args.log_format is not None:
+        overrides["log_format"] = args.log_format
     if args.executor:
         overrides["extra_executors"] = tuple(args.executor)
 
@@ -111,7 +114,7 @@ async def _run_worker(args: argparse.Namespace) -> None:
             "DSN is required: pass --dsn, set PYJOBKIT_DSN, or configure 'dsn' in .pyjobkit.toml"
         )
 
-    _configure_logging(config.log_level)
+    _configure_logging(config.log_level, fmt=config.log_format)
     worker: Worker | None = None
     stopped = False
     try:
@@ -202,6 +205,12 @@ def main() -> None:
         default=None,
         choices=list(LOG_LEVELS),
         help="Root logging level for the worker",
+    )
+    parser.add_argument(
+        "--log-format",
+        default=None,
+        choices=list(LOG_FORMATS),
+        help="Log format: 'text' (human) or 'json' (structured)",
     )
     args = parser.parse_args()
     try:

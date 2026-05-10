@@ -350,7 +350,8 @@ def test_worker_execute_cancelled_error(caplog: pytest.LogCaptureFixture) -> Non
         assert backend.cancelled == [backend.marked[0]]
         assert backend.failed == []
         assert any(
-            "Job %s cancelled during execution" % job_id in record.message
+            getattr(record, "event", None) == "job.cancelled"
+            and getattr(record, "job_id", None) == str(job_id)
             for record in caplog.records
         )
 

@@ -13,6 +13,7 @@ import logging
 import random
 from asyncio import Task
 from contextlib import suppress
+from time import perf_counter
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -130,11 +131,39 @@ class Worker:
             self._sem.release()
             self._decrement_active()
 
+    def _log_state(
+        self,
+        event: str,
+        *,
+        job_id: UUID,
+        status: str,
+        started_at: float | None,
+        **extra: Any,
+    ) -> None:
+        payload: dict[str, Any] = {
+            "event": event,
+            "job_id": str(job_id),
+            "worker_id": str(self.worker_id),
+            "status": status,
+        }
+        if started_at is not None:
+            payload["duration_ms"] = round((perf_counter() - started_at) * 1000, 3)
+        payload.update(extra)
+        logger.info("job state changed", extra=payload)
+
     async def _execute_row(self, row: dict[str, Any]) -> None:
         job_id = UUID(row["id"]) if not isinstance(row["id"], UUID) else row["id"]
         executor = self.engine.executor_for(row["kind"])
         if executor is None:
             await self.engine.fail(job_id, {"error": "unknown_kind", "kind": row["kind"]})
+            self._log_state(
+                "job.failed",
+                job_id=job_id,
+                status="failed",
+                started_at=None,
+                reason="unknown_kind",
+                kind=row["kind"],
+            )
             return
         ctx = self.engine.make_ctx(job_id)
         expected_version = row.get("version")
@@ -143,6 +172,14 @@ class Worker:
             self._extend_loop(job_id, expected_version, lease_lost)
         )
         cancel_task: asyncio.Task[None] | None = None
+        started_at = perf_counter()
+        self._log_state(
+            "job.started",
+            job_id=job_id,
+            status="running",
+            started_at=None,
+            kind=row["kind"],
+        )
         try:
             await self.engine.mark_running(job_id, self.worker_id)
             timeout = row.get("timeout_s") or 300
@@ -172,10 +209,22 @@ class Worker:
                 await lease_watch
             result = await exec_task
             if await ctx.is_cancelled():
-                logger.info("Job %s completed after cancellation request", job_id)
+                self._log_state(
+                    "job.cancelled",
+                    job_id=job_id,
+                    status="cancelled",
+                    started_at=started_at,
+                    note="completed after cancellation request",
+                )
                 await self.engine.cancel(job_id)
                 return
             await self.engine.succeed(job_id, result, expected_version=expected_version)
+            self._log_state(
+                "job.succeeded",
+                job_id=job_id,
+                status="success",
+                started_at=started_at,
+            )
         except asyncio.TimeoutError:
             exec_task.cancel()
             with suppress(asyncio.CancelledError):
@@ -184,24 +233,76 @@ class Worker:
             max_attempts = row.get("max_attempts", 3)
             if attempts >= max_attempts:
                 await self.engine.timeout(job_id, expected_version=expected_version)
+                self._log_state(
+                    "job.timeout",
+                    job_id=job_id,
+                    status="timeout",
+                    started_at=started_at,
+                    attempts=attempts,
+                )
             else:
-                await self.engine.retry(job_id, delay=2**(attempts - 1))
+                delay = 2 ** (attempts - 1)
+                await self.engine.retry(job_id, delay=delay)
+                self._log_state(
+                    "job.retry",
+                    job_id=job_id,
+                    status="queued",
+                    started_at=started_at,
+                    attempts=attempts,
+                    reason="timeout",
+                    retry_delay_s=delay,
+                )
         except LeaseLostError:
-            logger.info("Lease lost for job %s; abandoning result", job_id)
+            self._log_state(
+                "job.lease_lost",
+                job_id=job_id,
+                status="running",
+                started_at=started_at,
+            )
             return
         except asyncio.CancelledError:
-            logger.info("Job %s cancelled during execution", job_id)
+            self._log_state(
+                "job.cancelled",
+                job_id=job_id,
+                status="cancelled",
+                started_at=started_at,
+            )
             await self.engine.cancel(job_id)
             return
         except OptimisticLockError as exc:
-            logger.info("Optimistic lock failed for job %s: %s", job_id, exc)
+            self._log_state(
+                "job.lock_conflict",
+                job_id=job_id,
+                status="running",
+                started_at=started_at,
+                detail=str(exc),
+            )
             return
         except Exception as exc:  # pragma: no cover - defensive
             attempts = (row.get("attempts") or 0) + 1
             if attempts >= row.get("max_attempts", 3):
                 await self.engine.fail(job_id, {"error": repr(exc)}, expected_version=expected_version)
+                self._log_state(
+                    "job.failed",
+                    job_id=job_id,
+                    status="failed",
+                    started_at=started_at,
+                    attempts=attempts,
+                    exception_type=type(exc).__name__,
+                )
             else:
-                await self.engine.retry(job_id, delay=2**(attempts - 1))
+                delay = 2 ** (attempts - 1)
+                await self.engine.retry(job_id, delay=delay)
+                self._log_state(
+                    "job.retry",
+                    job_id=job_id,
+                    status="queued",
+                    started_at=started_at,
+                    attempts=attempts,
+                    reason="exception",
+                    exception_type=type(exc).__name__,
+                    retry_delay_s=delay,
+                )
         finally:
             if "lease_watch" in locals():
                 lease_watch.cancel()
