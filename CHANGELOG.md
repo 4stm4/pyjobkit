@@ -1,6 +1,11 @@
 
 ## Unreleased
 
+* **In-memory backend polish** (closes #68)
+  `MemoryBackend` is now re-exported as `pyjobkit.MemoryBackend` with a
+  documented "tests / prototyping / debug" status. Added `count(status=...)`,
+  `all_jobs()`, and `clear()` introspection helpers.
+
 * **TOML / environment configuration** (closes #46)
   New `pyjobkit.config` module loads settings from `.pyjobkit.toml` and
   `PYJOBKIT_*` environment variables. The worker CLI now accepts `--config`,

@@ -1,5 +1,6 @@
 """Pyjobkit: backend-agnostic job processing toolkit."""
 
+from .backends.memory import MemoryBackend
 from .config import Config, ConfigError, load_config
 from .engine import Engine
 from .worker import Worker
@@ -21,6 +22,7 @@ __all__ = [
     "Executor",
     "QueueBackend",
     "ExecContext",
+    "MemoryBackend",
     "Config",
     "ConfigError",
     "load_config",

@@ -1,4 +1,18 @@
-"""In-memory backend implementation."""
+"""In-memory backend implementation.
+
+This backend keeps the entire queue inside Python data structures
+(``dict`` + :class:`asyncio.Lock`) and ships with the library by default
+- no external services required. It is suitable for:
+
+* Unit tests and integration tests that want a real :class:`QueueBackend`
+  without spinning up Postgres.
+* Local prototyping / debugging.
+* Demos and tutorials.
+
+It is **not** durable - all state is lost when the process exits - and
+holds the global lock for the duration of every operation, so it is not
+intended for production workloads.
+"""
 
 from __future__ import annotations
 
@@ -196,6 +210,28 @@ class MemoryBackend(QueueBackend):
 
     async def check_connection(self) -> None:
         return None
+
+    # ---- Debug / introspection helpers (not part of QueueBackend) ----
+
+    async def count(self, status: str | None = None) -> int:
+        """Return the number of stored jobs, optionally filtered by ``status``."""
+
+        async with self._lock:
+            if status is None:
+                return len(self._jobs)
+            return sum(1 for job in self._jobs.values() if job.status == status)
+
+    async def all_jobs(self) -> list[dict]:
+        """Return a snapshot of every job currently stored in the backend."""
+
+        async with self._lock:
+            return [self._job_to_dict(job) for job in self._jobs.values()]
+
+    async def clear(self) -> None:
+        """Drop every stored job. Useful between test cases."""
+
+        async with self._lock:
+            self._jobs.clear()
 
     async def _finish(
         self,

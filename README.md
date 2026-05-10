@@ -126,6 +126,27 @@ pyjobkit --config /etc/pyjobkit.toml
 
 The same loader is exposed programmatically as `pyjobkit.load_config()` / `pyjobkit.Config`.
 
+### In-memory backend (testing / debug)
+
+For unit tests, prototyping, and tutorials the library ships with a
+fully-featured in-memory implementation of `QueueBackend`:
+
+```python
+from pyjobkit import Engine, MemoryBackend
+from pyjobkit.executors import SubprocessExecutor
+
+backend = MemoryBackend()
+engine = Engine(backend=backend, executors=[SubprocessExecutor()])
+job_id = await engine.enqueue(kind="subprocess", payload={"cmd": "echo hi"})
+# debug helpers
+print(await backend.count())                 # 1
+print(await backend.count(status="queued"))  # 1
+await backend.clear()
+```
+
+All state lives in process memory and is dropped when the process
+exits - do not use this backend for durable workloads.
+
 ## Extending Pyjobkit
 - **Custom executors** – Implement the `Executor` protocol, register instances when constructing the `Engine`, and leverage the `ExecContext` helpers (`log`, `set_progress`, `is_cancelled`).
 - **Alternate backends** – Implement the `QueueBackend` protocol to target message brokers or proprietary queues while reusing the worker and executor layers.
