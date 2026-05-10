@@ -18,6 +18,16 @@ from uuid import UUID
 class ExecContext(ABC):
     """Execution context passed to executors."""
 
+    is_shadow: bool = False
+    """``True`` when the worker is executing the job in shadow / dry-run mode.
+
+    Executors may use this flag to skip side effects (network calls,
+    database writes, etc.) while still performing the read-only parts of
+    their workflow. Logs and progress updates emitted through this context
+    are still delivered to their sinks, but the worker discards the
+    executor's return value.
+    """
+
     @abstractmethod
     async def log(self, message: str, /, *, stream: str = "stdout") -> None:
         """Persist a log line for the running job."""

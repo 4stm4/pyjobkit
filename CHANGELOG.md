@@ -18,6 +18,13 @@
   marker ships in the wheel so external type checkers honor the inline
   annotations (PEP 561).
 
+* **Shadow / dry-run mode** (closes #75)
+  `Engine.enqueue(..., shadow=True)` marks a job as dry-run. The worker
+  exposes `ctx.is_shadow = True` so executors can short-circuit side
+  effects; logs and progress updates are still delivered. The executor's
+  return value is discarded and the job completes with the marker result
+  `{"shadow": True, "result_discarded": True}`.
+
 * **Structured JSON logs** (closes #45)
   New `pyjobkit.logging.JsonFormatter` plus `configure_logging(level, fmt=...)`
   helper. The worker CLI gains `--log-format` (and config key `log_format`)

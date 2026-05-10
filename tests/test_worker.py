@@ -148,8 +148,9 @@ class _Engine:
     def executor_for(self, kind: str):
         return self._executors.get(kind)
 
-    def make_ctx(self, job_id: UUID) -> _DummyCtx:
+    def make_ctx(self, job_id: UUID, *, is_shadow: bool = False) -> _DummyCtx:
         ctx = _DummyCtx()
+        ctx.is_shadow = is_shadow
         self.contexts[job_id] = ctx
         return ctx
 

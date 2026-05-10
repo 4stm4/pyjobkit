@@ -18,7 +18,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from .contracts import OptimisticLockError
-from .engine import Engine
+from .engine import Engine, SHADOW_PAYLOAD_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +165,10 @@ class Worker:
                 kind=row["kind"],
             )
             return
-        ctx = self.engine.make_ctx(job_id)
+        raw_payload = row["payload"]
+        is_shadow = bool(raw_payload.get(SHADOW_PAYLOAD_KEY))
+        payload = {k: v for k, v in raw_payload.items() if k != SHADOW_PAYLOAD_KEY}
+        ctx = self.engine.make_ctx(job_id, is_shadow=is_shadow)
         expected_version = row.get("version")
         lease_lost = asyncio.Event()
         lease_task = asyncio.create_task(
@@ -179,12 +182,13 @@ class Worker:
             status="running",
             started_at=None,
             kind=row["kind"],
+            shadow=is_shadow,
         )
         try:
             await self.engine.mark_running(job_id, self.worker_id)
             timeout = row.get("timeout_s") or 300
             exec_task = asyncio.create_task(
-                executor.run(job_id=job_id, payload=row["payload"], ctx=ctx)
+                executor.run(job_id=job_id, payload=payload, ctx=ctx)
             )
 
             lease_watch = asyncio.create_task(lease_lost.wait())
@@ -218,13 +222,28 @@ class Worker:
                 )
                 await self.engine.cancel(job_id)
                 return
-            await self.engine.succeed(job_id, result, expected_version=expected_version)
-            self._log_state(
-                "job.succeeded",
-                job_id=job_id,
-                status="success",
-                started_at=started_at,
-            )
+            if is_shadow:
+                shadow_result = {"shadow": True, "result_discarded": True}
+                await self.engine.succeed(
+                    job_id, shadow_result, expected_version=expected_version
+                )
+                self._log_state(
+                    "job.shadow_succeeded",
+                    job_id=job_id,
+                    status="success",
+                    started_at=started_at,
+                    shadow=True,
+                )
+            else:
+                await self.engine.succeed(
+                    job_id, result, expected_version=expected_version
+                )
+                self._log_state(
+                    "job.succeeded",
+                    job_id=job_id,
+                    status="success",
+                    started_at=started_at,
+                )
         except asyncio.TimeoutError:
             exec_task.cancel()
             with suppress(asyncio.CancelledError):

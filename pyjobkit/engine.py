@@ -17,6 +17,9 @@ from .types import FailureReason, JobRecord, JobResult
 
 PROGRESS_TOPIC_TEMPLATE = "job.{job_id}.progress"
 KIND_PATTERN = re.compile(r"[A-Za-z0-9_.-]+")
+SHADOW_PAYLOAD_KEY = "__pjk_shadow"
+"""Payload key used to flag shadow / dry-run jobs at enqueue time."""
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,6 +43,7 @@ class DefaultExecContext(ExecContext):
     log_sink: LogSink
     event_bus: EventBus
     backend: QueueBackend
+    is_shadow: bool = False
 
     async def log(self, message: str, /, *, stream: str = "stdout") -> None:
         await self.log_sink.write(LogRecord(self.job_id, stream, message))
@@ -101,6 +105,7 @@ class Engine:
         max_attempts: int = 3,
         idempotency_key: str | None = None,
         timeout_s: int | None = None,
+        shadow: bool = False,
     ) -> UUID:
         """Enqueue a job for processing and return its identifier.
 
@@ -125,13 +130,16 @@ class Engine:
         if not KIND_PATTERN.fullmatch(kind):
             raise ValueError("kind must contain only alphanumerics, dash, underscore, or dot")
         logger.info(
-            "enqueue requested: kind=%s priority=%s scheduled_for=%s timeout_s=%s idempotency_key=%s",
+            "enqueue requested: kind=%s priority=%s scheduled_for=%s timeout_s=%s idempotency_key=%s shadow=%s",
             kind,
             priority,
             scheduled_for,
             timeout_s,
             idempotency_key,
+            shadow,
         )
+        if shadow:
+            payload = {**payload, SHADOW_PAYLOAD_KEY: True}
         await self._wait_for_capacity()
         job_id = await self.backend.enqueue(
             kind=kind,
@@ -176,13 +184,16 @@ class Engine:
             raise ValueError(f"duplicate executor kind registered: {executor.kind}")
         self.executors[executor.kind] = executor
 
-    def make_ctx(self, job_id: UUID) -> ExecContext:
-        return self._exec_context_factory(
+    def make_ctx(self, job_id: UUID, *, is_shadow: bool = False) -> ExecContext:
+        ctx = self._exec_context_factory(
             job_id,
             log_sink=self.log_sink,
             event_bus=self.event_bus,
             backend=self.backend,
         )
+        if is_shadow:
+            ctx.is_shadow = True
+        return ctx
 
     async def claim_batch(self, worker_id: UUID, *, limit: int = 1) -> list[QueueBackend.ClaimedJob]:
         return await self.backend.claim_batch(worker_id, limit=limit)
