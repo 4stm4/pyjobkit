@@ -98,6 +98,8 @@ def _resolve_config(args: argparse.Namespace) -> Config:
         overrides["log_level"] = args.log_level
     if args.log_format is not None:
         overrides["log_format"] = args.log_format
+    if args.retry_policy is not None:
+        overrides["retry_policy"] = args.retry_policy
     if args.executor:
         overrides["extra_executors"] = tuple(args.executor)
 
@@ -140,6 +142,7 @@ async def _run_worker(args: argparse.Namespace) -> None:
             batch=config.batch,
             poll_interval=config.poll_interval,
             lease_ttl=config.lease_ttl,
+            retry_policy=config.retry_policy,
         )
         try:
             await worker.run()
@@ -211,6 +214,14 @@ def main() -> None:
         default=None,
         choices=list(LOG_FORMATS),
         help="Log format: 'text' (human) or 'json' (structured)",
+    )
+    parser.add_argument(
+        "--retry-policy",
+        default=None,
+        help=(
+            "Default retry policy spec, e.g. 'exponential:1:2', "
+            "'exponential_jitter:1:2:30:0.1', or 'fixed:5'"
+        ),
     )
     args = parser.parse_args()
     try:

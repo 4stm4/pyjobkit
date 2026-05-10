@@ -18,6 +18,14 @@
   marker ships in the wheel so external type checkers honor the inline
   annotations (PEP 561).
 
+* **Pluggable retry policies** (closes #52)
+  New `pyjobkit.retry` module with `RetryPolicy` ABC and built-in
+  `FixedDelay`, `ExponentialBackoff`, `JitteredExponentialBackoff`.
+  Worker accepts a policy via its constructor or as a spec string
+  (`"exponential:1:2"`, `"exponential_jitter:1:2:30:0.1"`, `"fixed:5"`).
+  Per-job override available via `Engine.enqueue(..., retry_policy=...)`.
+  CLI gains `--retry-policy`; config gains `retry_policy`.
+
 * **Shadow / dry-run mode** (closes #75)
   `Engine.enqueue(..., shadow=True)` marks a job as dry-run. The worker
   exposes `ctx.is_shadow = True` so executors can short-circuit side

@@ -4,6 +4,13 @@ from .config import Config, ConfigError, load_config
 from .engine import Engine
 from .worker import Worker
 from .contracts import ExecContext, Executor, QueueBackend
+from .retry import (
+    ExponentialBackoff,
+    FixedDelay,
+    JitteredExponentialBackoff,
+    RetryPolicy,
+    parse_policy,
+)
 from .types import FailureReason, JobRecord, JobResult, JobStatus, LogStream
 
 __version__ = "0.2.0"
@@ -22,5 +29,10 @@ __all__ = [
     "JobResult",
     "JobStatus",
     "LogStream",
+    "RetryPolicy",
+    "FixedDelay",
+    "ExponentialBackoff",
+    "JitteredExponentialBackoff",
+    "parse_policy",
     "__version__",
 ]

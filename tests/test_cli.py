@@ -49,8 +49,18 @@ def test_run_worker_builds_components(monkeypatch) -> None:
                 created["engine"] = (backend, tuple(type(e).__name__ for e in executors))
 
         class FakeWorker:
-            def __init__(self, eng, *, max_concurrency, batch, poll_interval, lease_ttl):
+            def __init__(
+                self,
+                eng,
+                *,
+                max_concurrency,
+                batch,
+                poll_interval,
+                lease_ttl,
+                retry_policy=None,
+            ):
                 created["worker_args"] = (max_concurrency, batch, poll_interval, lease_ttl)
+                created["retry_policy"] = retry_policy
                 self.eng = eng
 
             async def run(self):
@@ -103,6 +113,7 @@ def test_run_worker_builds_components(monkeypatch) -> None:
             executor=None,
             log_level="INFO",
             log_format=None,
+            retry_policy=None,
         )
         await cli._run_worker(args)
         assert created["dsn"] == "sqlite://"
@@ -154,7 +165,16 @@ def test_cli_module_entrypoint(monkeypatch) -> None:
             created["engine"] = backend
 
     class FakeWorker:
-        def __init__(self, eng, *, max_concurrency, batch, poll_interval, lease_ttl):
+        def __init__(
+            self,
+            eng,
+            *,
+            max_concurrency,
+            batch,
+            poll_interval,
+            lease_ttl,
+            retry_policy=None,
+        ):
             self.eng = eng
 
         async def run(self):
@@ -260,6 +280,7 @@ def test_run_worker_requests_stop_on_cancel(monkeypatch) -> None:
             executor=None,
             log_level="INFO",
             log_format=None,
+            retry_policy=None,
         )
         with pytest.raises(asyncio.CancelledError):
             await cli._run_worker(args)

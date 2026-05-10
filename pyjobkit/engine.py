@@ -13,6 +13,7 @@ from uuid import UUID
 from .contracts import EventBus, ExecContext, Executor, LogRecord, LogSink, QueueBackend
 from .events.local import LocalEventBus
 from .logging.memory import MemoryLogSink
+from .retry import RETRY_POLICY_PAYLOAD_KEY, RetryPolicy, parse_policy
 from .types import FailureReason, JobRecord, JobResult
 
 PROGRESS_TOPIC_TEMPLATE = "job.{job_id}.progress"
@@ -106,6 +107,7 @@ class Engine:
         idempotency_key: str | None = None,
         timeout_s: int | None = None,
         shadow: bool = False,
+        retry_policy: str | RetryPolicy | None = None,
     ) -> UUID:
         """Enqueue a job for processing and return its identifier.
 
@@ -140,6 +142,15 @@ class Engine:
         )
         if shadow:
             payload = {**payload, SHADOW_PAYLOAD_KEY: True}
+        if retry_policy is not None:
+            if isinstance(retry_policy, RetryPolicy):
+                raise TypeError(
+                    "per-job retry_policy must be a string spec (e.g. 'exponential:1:2'); "
+                    "instances are not serializable. Configure the worker with a default "
+                    "instance instead."
+                )
+            parse_policy(retry_policy)  # eager validation
+            payload = {**payload, RETRY_POLICY_PAYLOAD_KEY: retry_policy}
         await self._wait_for_capacity()
         job_id = await self.backend.enqueue(
             kind=kind,

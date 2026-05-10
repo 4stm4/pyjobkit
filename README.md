@@ -114,6 +114,7 @@ log_level = "INFO"
 disable_skip_locked = false
 extra_executors = ["myapp.executors:make_celery"]
 log_format = "json"  # 'text' (default) or 'json' for structured logs
+retry_policy = "exponential_jitter:1:2:30:0.1"  # or "fixed:5", "exponential:1:2"
 ```
 
 ```bash

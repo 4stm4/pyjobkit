@@ -44,6 +44,7 @@ class Config:
     lease_ttl: int = 30
     log_level: str = "INFO"
     log_format: str = "text"
+    retry_policy: str = "exponential:1:2"
     disable_skip_locked: bool = False
     extra_executors: tuple[str, ...] = field(default_factory=tuple)
 
@@ -147,6 +148,10 @@ def _coerce_value(key: str, value: Any) -> Any:
         return _coerce_log_format(value)
     if key == "extra_executors":
         return _coerce_executors(value)
+    if key == "retry_policy":
+        if not isinstance(value, str) or not value.strip():
+            raise ConfigError(f"'retry_policy' must be a non-empty string (got {value!r})")
+        return value.strip()
     if key in {"dsn", "default_executor"}:
         if value is None:
             return None

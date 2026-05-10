@@ -19,6 +19,12 @@ from uuid import UUID, uuid4
 
 from .contracts import OptimisticLockError
 from .engine import Engine, SHADOW_PAYLOAD_KEY
+from .retry import (
+    DEFAULT_RETRY_POLICY,
+    RETRY_POLICY_PAYLOAD_KEY,
+    RetryPolicy,
+    parse_policy,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +44,7 @@ class Worker:
         lease_ttl: int = 30,
         queue_capacity: int | None = None,
         stop_timeout: float | None = 60,
+        retry_policy: RetryPolicy | str | None = None,
     ) -> None:
         self.engine = engine
         self.max_concurrency = max_concurrency
@@ -46,6 +53,12 @@ class Worker:
         self.lease_ttl = lease_ttl
         self.queue_capacity = queue_capacity
         self.stop_timeout = stop_timeout
+        if retry_policy is None:
+            self.retry_policy: RetryPolicy = DEFAULT_RETRY_POLICY
+        elif isinstance(retry_policy, RetryPolicy):
+            self.retry_policy = retry_policy
+        else:
+            self.retry_policy = parse_policy(retry_policy)
         self.worker_id = uuid4()
         self._stop = asyncio.Event()
         self._stopped = asyncio.Event()
@@ -167,7 +180,22 @@ class Worker:
             return
         raw_payload = row["payload"]
         is_shadow = bool(raw_payload.get(SHADOW_PAYLOAD_KEY))
-        payload = {k: v for k, v in raw_payload.items() if k != SHADOW_PAYLOAD_KEY}
+        per_job_policy_spec = raw_payload.get(RETRY_POLICY_PAYLOAD_KEY)
+        retry_policy = self.retry_policy
+        if per_job_policy_spec:
+            try:
+                retry_policy = parse_policy(per_job_policy_spec)
+            except ValueError:
+                logger.warning(
+                    "ignoring invalid per-job retry policy %r for job %s",
+                    per_job_policy_spec,
+                    job_id,
+                )
+        payload = {
+            k: v
+            for k, v in raw_payload.items()
+            if k not in (SHADOW_PAYLOAD_KEY, RETRY_POLICY_PAYLOAD_KEY)
+        }
         ctx = self.engine.make_ctx(job_id, is_shadow=is_shadow)
         expected_version = row.get("version")
         lease_lost = asyncio.Event()
@@ -260,7 +288,7 @@ class Worker:
                     attempts=attempts,
                 )
             else:
-                delay = 2 ** (attempts - 1)
+                delay = retry_policy.delay(attempts)
                 await self.engine.retry(job_id, delay=delay)
                 self._log_state(
                     "job.retry",
@@ -310,7 +338,7 @@ class Worker:
                     exception_type=type(exc).__name__,
                 )
             else:
-                delay = 2 ** (attempts - 1)
+                delay = retry_policy.delay(attempts)
                 await self.engine.retry(job_id, delay=delay)
                 self._log_state(
                     "job.retry",
