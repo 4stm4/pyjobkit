@@ -1,6 +1,13 @@
 
 ## Unreleased
 
+* **Per-kind rate limiting** (closes #73)
+  Worker accepts a `rate_limits` mapping of `{kind: {max_per_second,
+  burst}}`; each entry installs an async token-bucket consulted before
+  the executor runs. Configurable via `[pyjobkit.rate_limits.<kind>]`
+  TOML tables (or `PYJOBKIT_RATE_LIMITS="http:5:10,email:2"` /
+  `--rate-limit http:5:10`). Excess jobs wait until tokens refill.
+
 * **Executor phase profiling** (closes #74)
   `ExecContext.profile_phase("setup")` is an async context manager that
   measures the wall-clock duration of an executor phase, observes it in

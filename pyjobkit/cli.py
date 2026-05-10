@@ -107,6 +107,16 @@ def _resolve_config(args: argparse.Namespace) -> Config:
         overrides["retry_policy"] = args.retry_policy
     if args.watchdog_interval is not None:
         overrides["watchdog_interval_s"] = args.watchdog_interval
+    if args.rate_limit:
+        merged: dict[str, dict[str, float]] = {}
+        for entry in args.rate_limit:
+            try:
+                from .config import _parse_rate_limits_string
+
+                merged.update(_parse_rate_limits_string(entry))
+            except ConfigError as exc:
+                raise CLIError(str(exc)) from exc
+        overrides["rate_limits"] = merged
     if args.executor:
         overrides["extra_executors"] = tuple(args.executor)
 
@@ -159,6 +169,7 @@ async def _run_worker(args: argparse.Namespace) -> None:
             lease_ttl=config.lease_ttl,
             retry_policy=config.retry_policy,
             watchdog_interval_s=config.watchdog_interval_s,
+            rate_limits=config.rate_limits,
         )
         try:
             await worker.run()
@@ -223,6 +234,15 @@ def main() -> None:
         "--enable-plugins",
         action="store_true",
         help="Discover and register executors from 'pyjobkit.executors' entry points",
+    )
+    parser.add_argument(
+        "--rate-limit",
+        action="append",
+        default=None,
+        help=(
+            "Per-kind rate limit, e.g. 'http:5:10' (5 jobs/s, burst 10) or "
+            "'email:2'. Repeat the flag for multiple kinds."
+        ),
     )
     parser.add_argument(
         "--log-level",

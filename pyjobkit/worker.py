@@ -19,6 +19,7 @@ from uuid import UUID, uuid4
 
 from .contracts import OptimisticLockError
 from .engine import Engine, SHADOW_PAYLOAD_KEY
+from .ratelimit import RateLimitSpec, TokenBucket, parse_rate_limits
 from .retry import (
     DEFAULT_RETRY_POLICY,
     RETRY_POLICY_PAYLOAD_KEY,
@@ -46,6 +47,7 @@ class Worker:
         stop_timeout: float | None = 60,
         retry_policy: RetryPolicy | str | None = None,
         watchdog_interval_s: float | None = None,
+        rate_limits: dict | None = None,
     ) -> None:
         self.engine = engine
         self.max_concurrency = max_concurrency
@@ -67,6 +69,12 @@ class Worker:
             self.retry_policy = retry_policy
         else:
             self.retry_policy = parse_policy(retry_policy)
+        normalized_limits = parse_rate_limits(rate_limits)
+        self.rate_limits: dict[str, RateLimitSpec] = normalized_limits
+        self._buckets: dict[str, TokenBucket] = {
+            kind: TokenBucket(rate, burst)
+            for kind, (rate, burst) in normalized_limits.items()
+        }
         self.worker_id = uuid4()
         self._stop = asyncio.Event()
         self._stopped = asyncio.Event()
@@ -220,6 +228,9 @@ class Worker:
             kind=row["kind"],
             shadow=is_shadow,
         )
+        bucket = self._buckets.get(row["kind"])
+        if bucket is not None:
+            await bucket.acquire()
         try:
             await self.engine.mark_running(job_id, self.worker_id)
             timeout = row.get("timeout_s") or 300

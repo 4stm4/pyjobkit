@@ -59,10 +59,12 @@ def test_run_worker_builds_components(monkeypatch) -> None:
                 lease_ttl,
                 retry_policy=None,
                 watchdog_interval_s=None,
+                rate_limits=None,
             ):
                 created["worker_args"] = (max_concurrency, batch, poll_interval, lease_ttl)
                 created["retry_policy"] = retry_policy
                 created["watchdog_interval_s"] = watchdog_interval_s
+                created["rate_limits"] = rate_limits
                 self.eng = eng
 
             async def run(self):
@@ -118,6 +120,7 @@ def test_run_worker_builds_components(monkeypatch) -> None:
             retry_policy=None,
             watchdog_interval=None,
             enable_plugins=False,
+            rate_limit=None,
         )
         await cli._run_worker(args)
         assert created["dsn"] == "sqlite://"
@@ -179,6 +182,7 @@ def test_cli_module_entrypoint(monkeypatch) -> None:
             lease_ttl,
             retry_policy=None,
             watchdog_interval_s=None,
+            rate_limits=None,
         ):
             self.eng = eng
 
@@ -288,6 +292,7 @@ def test_run_worker_requests_stop_on_cancel(monkeypatch) -> None:
             retry_policy=None,
             watchdog_interval=None,
             enable_plugins=False,
+            rate_limit=None,
         )
         with pytest.raises(asyncio.CancelledError):
             await cli._run_worker(args)

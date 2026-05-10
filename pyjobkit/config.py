@@ -48,6 +48,7 @@ class Config:
     watchdog_interval_s: float | None = None
     disable_skip_locked: bool = False
     enable_plugins: bool = False
+    rate_limits: dict[str, dict[str, float]] = field(default_factory=dict)
     extra_executors: tuple[str, ...] = field(default_factory=tuple)
 
     def as_dict(self) -> dict[str, Any]:
@@ -115,6 +116,31 @@ def _coerce_log_format(value: Any) -> str:
     return lower
 
 
+def _parse_rate_limits_string(value: str) -> dict[str, dict[str, float]]:
+    """Parse CLI / env rate-limit specs of the form ``kind:rate[:burst],kind2:rate``."""
+
+    out: dict[str, dict[str, float]] = {}
+    parts = [item.strip() for item in value.split(",") if item.strip()]
+    for part in parts:
+        pieces = part.split(":")
+        if len(pieces) not in (2, 3):
+            raise ConfigError(
+                f"'rate_limits' entry {part!r} must be 'kind:rate' or 'kind:rate:burst'"
+            )
+        kind = pieces[0].strip()
+        if not kind:
+            raise ConfigError(f"'rate_limits' entry {part!r} has an empty kind")
+        try:
+            rate = float(pieces[1])
+            burst = float(pieces[2]) if len(pieces) == 3 else rate
+        except ValueError as exc:
+            raise ConfigError(
+                f"'rate_limits' entry {part!r} has non-numeric values"
+            ) from exc
+        out[kind] = {"max_per_second": rate, "burst": burst}
+    return out
+
+
 def _coerce_executors(value: Any) -> tuple[str, ...]:
     if value is None:
         return ()
@@ -158,6 +184,15 @@ def _coerce_value(key: str, value: Any) -> Any:
         if not isinstance(value, str) or not value.strip():
             raise ConfigError(f"'retry_policy' must be a non-empty string (got {value!r})")
         return value.strip()
+    if key == "rate_limits":
+        if isinstance(value, str):
+            return _parse_rate_limits_string(value)
+        if not isinstance(value, dict):
+            raise ConfigError(
+                f"'rate_limits' must be a mapping or 'kind:rate:burst' list "
+                f"(got {value!r})"
+            )
+        return {str(k): dict(v) for k, v in value.items()}
     if key in {"dsn", "default_executor"}:
         if value is None:
             return None
