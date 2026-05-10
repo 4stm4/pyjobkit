@@ -164,6 +164,79 @@ class Engine:
         logger.info("enqueue accepted: job_id=%s kind=%s priority=%s", job_id, kind, priority)
         return job_id
 
+    async def enqueue_at(
+        self,
+        when: datetime,
+        *,
+        kind: str,
+        payload: dict,
+        priority: int = 100,
+        max_attempts: int = 3,
+        idempotency_key: str | None = None,
+        timeout_s: int | None = None,
+        shadow: bool = False,
+        retry_policy: str | RetryPolicy | None = None,
+    ) -> UUID:
+        """Enqueue a job that should not run before ``when``.
+
+        ``when`` must be a timezone-aware :class:`datetime`. Naive
+        datetimes are rejected to avoid silent UTC-vs-local confusion.
+        """
+
+        if when.tzinfo is None:
+            raise ValueError(
+                "enqueue_at requires a timezone-aware datetime; "
+                "use datetime.now(timezone.utc) or similar"
+            )
+        return await self.enqueue(
+            kind=kind,
+            payload=payload,
+            priority=priority,
+            scheduled_for=when,
+            max_attempts=max_attempts,
+            idempotency_key=idempotency_key,
+            timeout_s=timeout_s,
+            shadow=shadow,
+            retry_policy=retry_policy,
+        )
+
+    async def enqueue_in(
+        self,
+        delay: float | timedelta,
+        *,
+        kind: str,
+        payload: dict,
+        priority: int = 100,
+        max_attempts: int = 3,
+        idempotency_key: str | None = None,
+        timeout_s: int | None = None,
+        shadow: bool = False,
+        retry_policy: str | RetryPolicy | None = None,
+    ) -> UUID:
+        """Enqueue a job that should not run for at least ``delay`` seconds.
+
+        ``delay`` accepts either a number of seconds or a
+        :class:`datetime.timedelta`.
+        """
+
+        if isinstance(delay, timedelta):
+            offset = delay
+        else:
+            offset = timedelta(seconds=float(delay))
+        if offset.total_seconds() < 0:
+            raise ValueError("enqueue_in delay must be non-negative")
+        return await self.enqueue_at(
+            datetime.now(timezone.utc) + offset,
+            kind=kind,
+            payload=payload,
+            priority=priority,
+            max_attempts=max_attempts,
+            idempotency_key=idempotency_key,
+            timeout_s=timeout_s,
+            shadow=shadow,
+            retry_policy=retry_policy,
+        )
+
     async def get(self, job_id: UUID) -> JobRecord:
         """Retrieve job metadata from the backend."""
 

@@ -1,6 +1,13 @@
 
 ## Unreleased
 
+* **Delayed scheduling helpers** (closes #57)
+  Added `Engine.enqueue_at(when=...)` and `Engine.enqueue_in(delay)` as
+  ergonomic wrappers over the existing `scheduled_for` parameter.
+  `enqueue_at` requires a timezone-aware `datetime`; `enqueue_in`
+  accepts either a number of seconds or a `timedelta`. Cron-style
+  recurring scheduling (`enqueue_every`) is not yet covered.
+
 * **Comparison documentation** (closes #65)
   Added `docs/comparison.md` positioning Pyjobkit against Celery, RQ,
   and Dramatiq with a feature matrix and "when to pick which" guidance.
