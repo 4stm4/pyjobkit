@@ -20,3 +20,9 @@ pyjobkit = "pyjobkit.cli:main"
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["pyjobkit*"]
+
+[tool.setuptools.package-data]
+pyjobkit = ["py.typed"]

@@ -13,6 +13,7 @@ from uuid import UUID
 from .contracts import EventBus, ExecContext, Executor, LogRecord, LogSink, QueueBackend
 from .events.local import LocalEventBus
 from .logging.memory import MemoryLogSink
+from .types import FailureReason, JobRecord, JobResult
 
 PROGRESS_TOPIC_TEMPLATE = "job.{job_id}.progress"
 KIND_PATTERN = re.compile(r"[A-Za-z0-9_.-]+")
@@ -144,11 +145,11 @@ class Engine:
         logger.info("enqueue accepted: job_id=%s kind=%s priority=%s", job_id, kind, priority)
         return job_id
 
-    async def get(self, job_id: UUID) -> dict:
+    async def get(self, job_id: UUID) -> JobRecord:
         """Retrieve job metadata from the backend."""
 
         logger.debug("get requested: job_id=%s", job_id)
-        return await self.backend.get(job_id)
+        return await self.backend.get(job_id)  # type: ignore[return-value]
 
     async def cancel(self, job_id: UUID) -> None:
         """Request cancellation of a job in the backend."""
@@ -202,14 +203,26 @@ class Engine:
         )
 
     async def succeed(
-        self, job_id: UUID, result: dict, *, expected_version: int | None = None
+        self,
+        job_id: UUID,
+        result: JobResult | dict[str, Any],
+        *,
+        expected_version: int | None = None,
     ) -> None:
-        await self.backend.succeed(job_id, result, expected_version=expected_version)
+        await self.backend.succeed(
+            job_id, dict(result), expected_version=expected_version
+        )
 
     async def fail(
-        self, job_id: UUID, reason: dict, *, expected_version: int | None = None
+        self,
+        job_id: UUID,
+        reason: FailureReason | dict[str, Any],
+        *,
+        expected_version: int | None = None,
     ) -> None:
-        await self.backend.fail(job_id, reason, expected_version=expected_version)
+        await self.backend.fail(
+            job_id, dict(reason), expected_version=expected_version
+        )
 
     async def timeout(self, job_id: UUID, *, expected_version: int | None = None) -> None:
         await self.backend.timeout(job_id, expected_version=expected_version)
