@@ -147,6 +147,11 @@ await backend.clear()
 All state lives in process memory and is dropped when the process
 exits - do not use this backend for durable workloads.
 
+## Comparison with other Python job libraries
+
+See [docs/comparison.md](docs/comparison.md) for a head-to-head
+positioning against Celery, RQ, and Dramatiq.
+
 ## Extending Pyjobkit
 - **Custom executors** – Implement the `Executor` protocol, register instances when constructing the `Engine`, and leverage the `ExecContext` helpers (`log`, `set_progress`, `is_cancelled`).
 - **Alternate backends** – Implement the `QueueBackend` protocol to target message brokers or proprietary queues while reusing the worker and executor layers.

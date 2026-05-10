@@ -1,6 +1,10 @@
 
 ## Unreleased
 
+* **Comparison documentation** (closes #65)
+  Added `docs/comparison.md` positioning Pyjobkit against Celery, RQ,
+  and Dramatiq with a feature matrix and "when to pick which" guidance.
+
 * **Configurable watchdog interval** (closes #72)
   `Worker` now accepts `watchdog_interval_s` (CLI `--watchdog-interval`,
   config `watchdog_interval_s`); when omitted it falls back to the
