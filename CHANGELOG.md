@@ -1,6 +1,13 @@
 
 ## Unreleased
 
+* **Dynamic routing hook** (closes #76)
+  `Engine.set_router(callable)` installs a synchronous function called
+  during `enqueue(kind, payload)`; returning a non-None string overrides
+  the dispatch kind. Useful for picking specialized executors based on
+  payload shape or tags. The returned kind is still validated against
+  the executor registry's naming rules.
+
 * **mkdocs documentation scaffolding** (closes #66)
   Added `mkdocs.yml` plus structured pages (`docs/index.md`,
   `getting-started.md`, `configuration.md`, `extending.md`, `api.md`,

@@ -7,8 +7,15 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import re
-from typing import Any, Iterable, Protocol
+from typing import Any, Callable, Iterable, Protocol
 from uuid import UUID
+
+Router = Callable[[str, dict], str | None]
+"""Signature for a routing function: ``(kind, payload) -> new_kind | None``.
+
+Returning a string overrides the ``kind`` used to dispatch the job. Returning
+``None`` keeps the caller-supplied kind unchanged.
+"""
 
 from .contracts import EventBus, ExecContext, Executor, LogRecord, LogSink, QueueBackend
 from .events.local import LocalEventBus
@@ -95,6 +102,20 @@ class Engine:
         self.enqueue_timeout_s = enqueue_timeout_s
         self._enqueue_check_interval_s = enqueue_check_interval_s
         self._exec_context_factory = exec_context_factory or DefaultExecContext
+        self._router: Router | None = None
+
+    def set_router(self, router: Router | None) -> None:
+        """Install (or remove) a routing function applied during ``enqueue``.
+
+        The router is invoked with the caller-supplied ``(kind, payload)``
+        before validation and may return a new ``kind`` string to override
+        the dispatch destination - useful for picking specialized
+        executors based on payload shape or tags.
+        """
+
+        if router is not None and not callable(router):
+            raise TypeError("router must be callable or None")
+        self._router = router
 
     async def enqueue(
         self,
@@ -129,6 +150,13 @@ class Engine:
             UUID: The identifier of the enqueued job.
         """
 
+        if self._router is not None:
+            routed = self._router(kind, payload)
+            if routed is not None and routed != kind:
+                logger.info(
+                    "router rewrote kind: %s -> %s", kind, routed
+                )
+                kind = routed
         if not KIND_PATTERN.fullmatch(kind):
             raise ValueError("kind must contain only alphanumerics, dash, underscore, or dot")
         logger.info(
