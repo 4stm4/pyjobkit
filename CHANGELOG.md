@@ -1,6 +1,14 @@
 
 ## Unreleased
 
+* **Job tags + worker tag filter** (closes #53)
+  `Engine.enqueue(..., tags=["high-priority", "user=42"])` attaches a
+  normalised, deduplicated tag list to the job (carried in a payload
+  marker so no schema change is needed). `Worker(..., tags=[...])`
+  claims only jobs whose tag set intersects the worker's filter; the
+  rest are released back to the queue with zero delay. The marker is
+  stripped from the payload before reaching the executor.
+
 * **Webhook notifications on terminal states** (closes #56)
   `Engine.enqueue(..., webhooks={"complete": url, "fail": url,
   "timeout": url})` attaches per-job webhook URLs that the worker POSTs

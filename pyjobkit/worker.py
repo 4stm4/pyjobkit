@@ -20,7 +20,7 @@ from uuid import UUID, uuid4
 from typing import Awaitable, Callable
 
 from .contracts import OptimisticLockError
-from .engine import Engine, SHADOW_PAYLOAD_KEY
+from .engine import Engine, SHADOW_PAYLOAD_KEY, TAGS_PAYLOAD_KEY
 from .ratelimit import RateLimitSpec, TokenBucket, parse_rate_limits
 from .retry import (
     DEFAULT_RETRY_POLICY,
@@ -56,6 +56,7 @@ class Worker:
         rate_limits: dict | None = None,
         on_lease_lost: LeaseLostCallback | None = None,
         kinds: Iterable[str] | None = None,
+        tags: Iterable[str] | None = None,
     ) -> None:
         self.engine = engine
         self.max_concurrency = max_concurrency
@@ -86,6 +87,9 @@ class Worker:
         self.on_lease_lost = on_lease_lost
         self.kinds: frozenset[str] | None = (
             frozenset(kinds) if kinds is not None else None
+        )
+        self.tags: frozenset[str] | None = (
+            frozenset(tags) if tags is not None else None
         )
         self.worker_id = uuid4()
         self._stop = asyncio.Event()
@@ -157,8 +161,8 @@ class Worker:
                         backoff = min(backoff * 2, 30)
                         continue
 
-                    if self.kinds is not None:
-                        accepted, rejected = self._partition_by_kind(rows)
+                    if self.kinds is not None or self.tags is not None:
+                        accepted, rejected = self._partition_by_filter(rows)
                         rows = accepted
                         for skipped in rejected:
                             try:
@@ -195,17 +199,22 @@ class Worker:
             finally:
                 self._stopped.set()
 
-    def _partition_by_kind(
+    def _partition_by_filter(
         self, rows: list[dict[str, Any]]
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         accepted: list[dict[str, Any]] = []
         rejected: list[dict[str, Any]] = []
-        assert self.kinds is not None
         for row in rows:
-            if row.get("kind") in self.kinds:
-                accepted.append(row)
-            else:
+            if self.kinds is not None and row.get("kind") not in self.kinds:
                 rejected.append(row)
+                continue
+            if self.tags is not None:
+                payload = row.get("payload") or {}
+                job_tags = set(payload.get(TAGS_PAYLOAD_KEY) or ())
+                if not (job_tags & self.tags):
+                    rejected.append(row)
+                    continue
+            accepted.append(row)
         return accepted, rejected
 
     async def _run_row(self, row: dict[str, Any]) -> None:
@@ -300,6 +309,7 @@ class Worker:
                 SHADOW_PAYLOAD_KEY,
                 RETRY_POLICY_PAYLOAD_KEY,
                 WEBHOOK_PAYLOAD_KEY,
+                TAGS_PAYLOAD_KEY,
             )
         }
         ctx = self.engine.make_ctx(job_id, is_shadow=is_shadow)

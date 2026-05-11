@@ -29,6 +29,9 @@ KIND_PATTERN = re.compile(r"[A-Za-z0-9_.-]+")
 SHADOW_PAYLOAD_KEY = "__pjk_shadow"
 """Payload key used to flag shadow / dry-run jobs at enqueue time."""
 
+TAGS_PAYLOAD_KEY = "__pjk_tags"
+"""Payload key carrying a list of tags assigned to the job."""
+
 logger = logging.getLogger(__name__)
 
 
@@ -131,6 +134,7 @@ class Engine:
         shadow: bool = False,
         retry_policy: str | RetryPolicy | None = None,
         webhooks: dict[str, str] | None = None,
+        tags: Iterable[str] | None = None,
     ) -> UUID:
         """Enqueue a job for processing and return its identifier.
 
@@ -184,6 +188,10 @@ class Engine:
         normalized_webhooks = normalize_webhooks(webhooks)
         if normalized_webhooks:
             payload = {**payload, WEBHOOK_PAYLOAD_KEY: normalized_webhooks}
+        if tags is not None:
+            tag_list = sorted({str(t).strip() for t in tags if str(t).strip()})
+            if tag_list:
+                payload = {**payload, TAGS_PAYLOAD_KEY: tag_list}
         await self._wait_for_capacity()
         job_id = await self.backend.enqueue(
             kind=kind,
