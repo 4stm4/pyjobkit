@@ -1,6 +1,14 @@
 
 ## Unreleased
 
+* **FastAPI integration + REST API** (closes #58, #64)
+  New `pyjobkit.integrations.fastapi.make_router(engine)` returns an
+  `APIRouter` exposing `POST /jobs`, `GET /jobs/{id}`,
+  `POST /jobs/{id}/cancel`, and `GET /healthz`. Mount it into any
+  FastAPI app. Install via `pyjobkit[fastapi]`. The dependency is
+  lazy-imported - `make_router` raises `FastAPIDependencyMissing` when
+  fastapi / pydantic are absent.
+
 * **DockerExecutor** (closes #49)
   New `pyjobkit.executors.docker.DockerExecutor` runs one-shot Docker
   containers per job using the optional `aiodocker` package. Payload
