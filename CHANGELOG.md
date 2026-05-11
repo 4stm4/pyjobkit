@@ -1,6 +1,13 @@
 
 ## Unreleased
 
+* **`--once` mode and `--kind` filter** (closes #47)
+  `Worker.run(once=True)` drains the queue then exits, suitable for
+  cron-style invocations. `Worker(..., kinds=[...])` restricts the
+  worker to specific job kinds; mismatched claims are released back to
+  the queue with zero delay. The CLI exposes both as `--once` and a
+  repeatable `--kind` flag.
+
 * **Worker Docker image** (closes #60)
   Added a two-stage `Dockerfile` that builds a wheel and installs it
   into a slim Python image as the `pyjobkit` user. `ENTRYPOINT

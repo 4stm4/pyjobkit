@@ -14,7 +14,7 @@ import random
 from asyncio import Task
 from contextlib import suppress
 from time import perf_counter
-from typing import Any
+from typing import Any, Iterable
 from uuid import UUID, uuid4
 
 from typing import Awaitable, Callable
@@ -53,6 +53,7 @@ class Worker:
         watchdog_interval_s: float | None = None,
         rate_limits: dict | None = None,
         on_lease_lost: LeaseLostCallback | None = None,
+        kinds: Iterable[str] | None = None,
     ) -> None:
         self.engine = engine
         self.max_concurrency = max_concurrency
@@ -81,6 +82,9 @@ class Worker:
             for kind, (rate, burst) in normalized_limits.items()
         }
         self.on_lease_lost = on_lease_lost
+        self.kinds: frozenset[str] | None = (
+            frozenset(kinds) if kinds is not None else None
+        )
         self.worker_id = uuid4()
         self._stop = asyncio.Event()
         self._stopped = asyncio.Event()
@@ -119,11 +123,21 @@ class Worker:
 
         await self._stopped.wait()
 
-    async def run(self) -> None:
+    async def run(self, *, once: bool = False) -> None:
+        """Run the worker loop.
+
+        When ``once`` is set the worker drains the queue (claims jobs
+        until ``claim_batch`` returns empty, processes them, repeats
+        only while jobs were claimed) and then exits gracefully. This
+        is useful for batch / cron-style invocations that should finish
+        when there is nothing left to do.
+        """
+
         backoff = self.poll_interval
         try:
             async with asyncio.TaskGroup() as tg:
-                tg.create_task(self._reap_loop())
+                if not once:
+                    tg.create_task(self._reap_loop())
                 while not self._stop.is_set():
                     try:
                         rows = await self.engine.claim_batch(
@@ -141,7 +155,27 @@ class Worker:
                         backoff = min(backoff * 2, 30)
                         continue
 
+                    if self.kinds is not None:
+                        accepted, rejected = self._partition_by_kind(rows)
+                        rows = accepted
+                        for skipped in rejected:
+                            try:
+                                await self.engine.retry(
+                                    skipped["id"]
+                                    if isinstance(skipped["id"], UUID)
+                                    else UUID(str(skipped["id"])),
+                                    delay=0,
+                                )
+                            except Exception as exc:  # pragma: no cover - defensive
+                                logger.warning(
+                                    "failed to release %s back to queue: %s",
+                                    skipped.get("id"),
+                                    exc,
+                                )
+
                     if not rows:
+                        if once:
+                            break
                         await asyncio.sleep(self._jitter(self.poll_interval))
                         continue
 
@@ -158,6 +192,19 @@ class Worker:
                 await self._wait_for_drain()
             finally:
                 self._stopped.set()
+
+    def _partition_by_kind(
+        self, rows: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        accepted: list[dict[str, Any]] = []
+        rejected: list[dict[str, Any]] = []
+        assert self.kinds is not None
+        for row in rows:
+            if row.get("kind") in self.kinds:
+                accepted.append(row)
+            else:
+                rejected.append(row)
+        return accepted, rejected
 
     async def _run_row(self, row: dict[str, Any]) -> None:
         try:

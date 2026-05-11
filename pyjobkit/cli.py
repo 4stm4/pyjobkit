@@ -170,9 +170,10 @@ async def _run_worker(args: argparse.Namespace) -> None:
             retry_policy=config.retry_policy,
             watchdog_interval_s=config.watchdog_interval_s,
             rate_limits=config.rate_limits,
+            kinds=args.kind or None,
         )
         try:
-            await worker.run()
+            await worker.run(once=args.once)
         except asyncio.CancelledError:
             worker.request_stop()
             await worker.wait_stopped()
@@ -234,6 +235,21 @@ def main() -> None:
         "--enable-plugins",
         action="store_true",
         help="Discover and register executors from 'pyjobkit.executors' entry points",
+    )
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Drain available jobs once then exit (no infinite poll loop)",
+    )
+    parser.add_argument(
+        "--kind",
+        action="append",
+        default=None,
+        help=(
+            "Restrict the worker to jobs whose 'kind' is in this set. "
+            "Repeat to allow multiple kinds. Rejected claims are released "
+            "back to the queue."
+        ),
     )
     parser.add_argument(
         "--rate-limit",
