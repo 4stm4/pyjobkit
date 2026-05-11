@@ -36,6 +36,13 @@ RETRY_POLICY_PAYLOAD_KEY = "__pjk_retry_policy"
 class RetryPolicy(ABC):
     """Strategy that decides the delay before the next retry attempt."""
 
+    #: Wall-clock cap on the total age of a job under retry. ``None``
+    #: (the default) means "no cap; let ``max_attempts`` decide". Set
+    #: this to bound runaway backoffs - e.g. a policy with ``base=1``,
+    #: ``factor=2``, ``max_attempts=20`` would otherwise stretch a job
+    #: across many days.
+    give_up_after_age_s: float | None = None
+
     @abstractmethod
     def delay(self, attempt: int) -> float:
         """Return the delay in seconds before retrying attempt ``attempt``.
@@ -46,6 +53,14 @@ class RetryPolicy(ABC):
         the value to a reasonable range.
         """
 
+    def should_give_up(self, age_s: float) -> bool:
+        """Return ``True`` when ``age_s`` has exceeded :attr:`give_up_after_age_s`."""
+
+        return (
+            self.give_up_after_age_s is not None
+            and age_s >= float(self.give_up_after_age_s)
+        )
+
     def __repr__(self) -> str:  # pragma: no cover - cosmetic
         return f"{type(self).__name__}()"
 
@@ -53,10 +68,16 @@ class RetryPolicy(ABC):
 class FixedDelay(RetryPolicy):
     """Always wait the same number of seconds between attempts."""
 
-    def __init__(self, delay_s: float = 1.0) -> None:
+    def __init__(
+        self,
+        delay_s: float = 1.0,
+        *,
+        give_up_after_age_s: float | None = None,
+    ) -> None:
         if delay_s < 0:
             raise ValueError("delay_s must be non-negative")
         self.delay_s = float(delay_s)
+        self.give_up_after_age_s = give_up_after_age_s
 
     def delay(self, attempt: int) -> float:  # noqa: D401 - protocol method
         return self.delay_s
@@ -75,6 +96,8 @@ class ExponentialBackoff(RetryPolicy):
         base: float = 1.0,
         factor: float = 2.0,
         max_delay_s: float | None = None,
+        *,
+        give_up_after_age_s: float | None = None,
     ) -> None:
         if base < 0:
             raise ValueError("base must be non-negative")
@@ -85,6 +108,7 @@ class ExponentialBackoff(RetryPolicy):
         self.base = float(base)
         self.factor = float(factor)
         self.max_delay_s = max_delay_s
+        self.give_up_after_age_s = give_up_after_age_s
 
     def delay(self, attempt: int) -> float:
         n = max(1, attempt)
@@ -109,8 +133,15 @@ class JitteredExponentialBackoff(ExponentialBackoff):
         max_delay_s: float | None = None,
         jitter: float = 0.1,
         rng: random.Random | None = None,
+        *,
+        give_up_after_age_s: float | None = None,
     ) -> None:
-        super().__init__(base=base, factor=factor, max_delay_s=max_delay_s)
+        super().__init__(
+            base=base,
+            factor=factor,
+            max_delay_s=max_delay_s,
+            give_up_after_age_s=give_up_after_age_s,
+        )
         if not 0 <= jitter <= 1:
             raise ValueError("jitter must be in [0, 1]")
         self.jitter = float(jitter)
@@ -149,6 +180,10 @@ def parse_policy(spec: str | RetryPolicy) -> RetryPolicy:
       - :class:`ExponentialBackoff` ``(base, factor, max_delay_s)``
     * ``"exponential_jitter"`` / ``"exponential_jitter:1:2:30:0.2"``
       - :class:`JitteredExponentialBackoff`
+
+    Any positional argument written as ``key=value`` is interpreted as a
+    keyword argument; today the only supported keyword is
+    ``give_up_after_age_s`` (e.g. ``"exponential:1:2:30:give_up_after_age_s=3600"``).
     """
 
     if isinstance(spec, RetryPolicy):
@@ -158,12 +193,27 @@ def parse_policy(spec: str | RetryPolicy) -> RetryPolicy:
 
     name, *parts = spec.split(":")
     name = name.strip().lower()
-    args = _parse_floats(parts)
+
+    positional: list[str] = []
+    keywords: dict[str, float] = {}
+    for piece in parts:
+        if "=" in piece:
+            key, _, value = piece.partition("=")
+            key = key.strip()
+            try:
+                keywords[key] = float(value)
+            except ValueError as exc:
+                raise ValueError(
+                    f"retry policy keyword {key!r} must be numeric (got {value!r})"
+                ) from exc
+        else:
+            positional.append(piece)
+    args = _parse_floats(positional)
 
     if name == "fixed":
-        return FixedDelay(*args) if args else FixedDelay()
+        return FixedDelay(*args, **keywords) if (args or keywords) else FixedDelay()
     if name == "exponential":
-        return ExponentialBackoff(*args)
+        return ExponentialBackoff(*args, **keywords)
     if name == "exponential_jitter":
-        return JitteredExponentialBackoff(*args)
+        return JitteredExponentialBackoff(*args, **keywords)
     raise ValueError(f"unknown retry policy: {name!r}")

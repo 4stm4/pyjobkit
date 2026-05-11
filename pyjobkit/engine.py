@@ -208,6 +208,21 @@ class Engine:
         logger.info("enqueue accepted: job_id=%s kind=%s priority=%s", job_id, kind, priority)
         return job_id
 
+    async def enqueue_many(self, jobs: Iterable[dict[str, Any]]) -> list[UUID]:
+        """Enqueue a batch of jobs and return their ids in the same order.
+
+        Each entry is a kwargs mapping accepted by :meth:`enqueue`. The
+        operation goes through :meth:`enqueue` per row (so shadow / tags
+        / webhooks / retry_policy markers are applied uniformly), but
+        the backend may amortise the round trips internally when it
+        provides a ``enqueue_many`` method.
+        """
+
+        jobs_list = list(jobs)
+        if not jobs_list:
+            return []
+        return [await self.enqueue(**spec) for spec in jobs_list]
+
     async def enqueue_at(
         self,
         when: datetime,

@@ -252,6 +252,25 @@ class Worker:
             self._sem.release()
             self._decrement_active()
 
+    @staticmethod
+    def _age_seconds(row: dict[str, Any]) -> float | None:
+        created = row.get("created_at")
+        if created is None:
+            return None
+        if isinstance(created, str):
+            from datetime import datetime as _dt
+
+            try:
+                created = _dt.fromisoformat(created)
+            except ValueError:
+                return None
+        from datetime import datetime, timezone
+
+        try:
+            return (datetime.now(timezone.utc) - created).total_seconds()
+        except TypeError:
+            return None
+
     async def _fire_webhook(
         self,
         webhooks_spec: dict[str, str] | None,
@@ -443,7 +462,11 @@ class Worker:
                 await exec_task
             attempts = (row.get("attempts") or 0) + 1
             max_attempts = row.get("max_attempts", 3)
-            if attempts >= max_attempts:
+            age = self._age_seconds(row)
+            give_up_age = (
+                age is not None and retry_policy.should_give_up(age)
+            )
+            if attempts >= max_attempts or give_up_age:
                 await self.engine.timeout(job_id, expected_version=expected_version)
                 self._log_state(
                     "job.timeout",
@@ -451,6 +474,7 @@ class Worker:
                     status="timeout",
                     started_at=started_at,
                     attempts=attempts,
+                    age_exhausted=give_up_age,
                 )
                 await self._fire_webhook(
                     webhooks_spec,
@@ -511,8 +535,13 @@ class Worker:
             return
         except Exception as exc:  # pragma: no cover - defensive
             attempts = (row.get("attempts") or 0) + 1
-            if attempts >= row.get("max_attempts", 3):
-                fail_result = {"error": repr(exc)}
+            age = self._age_seconds(row)
+            give_up_age = age is not None and retry_policy.should_give_up(age)
+            if attempts >= row.get("max_attempts", 3) or give_up_age:
+                fail_result = {
+                    "error": repr(exc),
+                    **({"reason": "age_exhausted"} if give_up_age else {}),
+                }
                 await self.engine.fail(job_id, fail_result, expected_version=expected_version)
                 self._log_state(
                     "job.failed",
@@ -521,6 +550,7 @@ class Worker:
                     started_at=started_at,
                     attempts=attempts,
                     exception_type=type(exc).__name__,
+                    age_exhausted=give_up_age,
                 )
                 await self._fire_webhook(
                     webhooks_spec,

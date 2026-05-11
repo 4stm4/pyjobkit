@@ -91,6 +91,23 @@ def test_parse_policy_rejects_empty() -> None:
         parse_policy("")
 
 
+def test_should_give_up_after_age() -> None:
+    p = ExponentialBackoff(base=1, factor=2, give_up_after_age_s=60)
+    assert p.should_give_up(30) is False
+    assert p.should_give_up(60) is True
+    assert p.should_give_up(120) is True
+
+    no_cap = ExponentialBackoff(base=1, factor=2)
+    assert no_cap.should_give_up(10_000) is False
+
+
+def test_parse_policy_accepts_keyword_args() -> None:
+    p = parse_policy("exponential:1:2:30:give_up_after_age_s=3600")
+    assert isinstance(p, ExponentialBackoff)
+    assert p.give_up_after_age_s == 3600
+    assert p.max_delay_s == 30
+
+
 def test_default_policy_matches_legacy_schedule() -> None:
     # The pre-existing worker used 2 ** (attempts - 1).
     for attempts in range(1, 7):
