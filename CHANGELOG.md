@@ -1,6 +1,12 @@
 
 ## Unreleased
 
+* **Race / concurrency test coverage** (closes #77)
+  Added `tests/test_races.py` with focused stress tests for parallel
+  enqueue uniqueness, multi-worker single-execution invariants,
+  cancellation under load, retry convergence, and optimistic-lock
+  protection against double-completion.
+
 * **Job tags + worker tag filter** (closes #53)
   `Engine.enqueue(..., tags=["high-priority", "user=42"])` attaches a
   normalised, deduplicated tag list to the job (carried in a payload
