@@ -1,6 +1,13 @@
 
 ## Unreleased
 
+* **Leader election primitives** (closes #61)
+  New `pyjobkit.leader` module exposes a `LeaderLock` ABC, an
+  in-process `MemoryLeaderLock` reference implementation that shares
+  state across instances by name, and a `leader_loop(...)` helper that
+  drives a coroutine while the lock is held with automatic renewal.
+  Production deployments back the lock with a SQL row or Redis SETNX.
+
 * **Prometheus `/metrics` server** (closes #44)
   New `pyjobkit.metrics.start_metrics_server(port, host)` helper boots
   the `prometheus_client` HTTP exporter in a daemon thread; the worker
