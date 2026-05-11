@@ -14,7 +14,7 @@ from .retry import (
 )
 from .types import FailureReason, JobRecord, JobResult, JobStatus, LogStream
 
-__version__ = "0.2.0"
+__version__ = "1.0.0"
 
 __all__ = [
     "Engine",

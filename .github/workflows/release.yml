@@ -1,0 +1,66 @@
+# Tag-triggered release pipeline (issue #79).
+#
+# On every `v*` tag push:
+# 1. Run the full test suite to gate the release.
+# 2. Build sdist + wheel with `python -m build`.
+# 3. Upload to PyPI using the project-scoped token.
+# 4. Create / update a GitHub Release with the section of
+#    CHANGELOG.md matching the tag.
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    if: github.repository == '4stm4/pyjobkit'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install with test extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+          pip install pytest pytest-cov
+      - name: Run tests
+        run: pytest -q
+
+  build-and-publish:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install build / publish tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+      - name: Build distributions
+        run: python -m build
+      - name: Verify metadata
+        run: twine check dist/*
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: twine upload dist/*
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: CHANGELOG.md
+          generate_release_notes: false
+          files: |
+            dist/*.whl
+            dist/*.tar.gz

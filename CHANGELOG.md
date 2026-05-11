@@ -1,5 +1,25 @@
 
-## Unreleased
+## 1.0.0 - API freeze
+
+This is the first stable release of Pyjobkit. The public surface
+re-exported from `pyjobkit/__init__.py` is now covered by Semantic
+Versioning - see `docs/stability.md` for the policy.
+
+* **Release pipeline** (closes #79)
+  Added `.github/workflows/release.yml` triggered on every `v*` tag:
+  runs the full test suite, builds sdist + wheel with `python -m build`,
+  uploads to PyPI through the project-scoped token, and creates a
+  GitHub Release with the CHANGELOG body and built artifacts.
+
+* **Release announcement** (closes #80)
+  `docs/release-1.0.md` introduces 1.0 to readers: what's in the box,
+  who it's for, how to install, and what the stability guarantee
+  covers.
+
+* **Frozen public API** (closes #78)
+  Bumped `__version__` to `1.0.0`. Added `docs/stability.md`
+  documenting what is public, what is internal, and the deprecation /
+  schema-migration rules.
 
 * **Race / concurrency test coverage** (closes #77)
   Added `tests/test_races.py` with focused stress tests for parallel

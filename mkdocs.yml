@@ -36,8 +36,11 @@ nav:
   - Configuration: configuration.md
   - Extending Pyjobkit: extending.md
   - API reference: api.md
+  - Stability policy: stability.md
   - FAQ: faq.md
   - Comparison: comparison.md
+  - Release notes:
+    - 1.0 announcement: release-1.0.md
 
 markdown_extensions:
   - admonition
