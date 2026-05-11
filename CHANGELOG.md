@@ -1,6 +1,12 @@
 
 ## Unreleased
 
+* **`pyjobkit-simulate` console script** (closes #69)
+  Run a list of jobs described in JSON (or YAML, when PyYAML is
+  installed) against the in-memory backend, then print a per-status
+  summary. Exits non-zero if any job ended in `failed` or `timeout`.
+  Useful for local debugging and CI smoke tests without a database.
+
 * **`--once` mode and `--kind` filter** (closes #47)
   `Worker.run(once=True)` drains the queue then exits, suitable for
   cron-style invocations. `Worker(..., kinds=[...])` restricts the
