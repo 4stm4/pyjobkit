@@ -1,6 +1,13 @@
 
 ## Unreleased
 
+* **Webhook notifications on terminal states** (closes #56)
+  `Engine.enqueue(..., webhooks={"complete": url, "fail": url,
+  "timeout": url})` attaches per-job webhook URLs that the worker POSTs
+  to with a JSON body (`job_id`, `kind`, `status`, `attempts`,
+  `duration_ms`, `result`) when the matching terminal state is reached.
+  Webhook failures are logged but never affect job state.
+
 * **Dynamic routing hook** (closes #76)
   `Engine.set_router(callable)` installs a synchronous function called
   during `enqueue(kind, payload)`; returning a non-None string overrides

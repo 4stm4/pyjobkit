@@ -22,6 +22,7 @@ from .events.local import LocalEventBus
 from .logging.memory import MemoryLogSink
 from .retry import RETRY_POLICY_PAYLOAD_KEY, RetryPolicy, parse_policy
 from .types import FailureReason, JobRecord, JobResult
+from .webhooks import WEBHOOK_PAYLOAD_KEY, normalize_webhooks
 
 PROGRESS_TOPIC_TEMPLATE = "job.{job_id}.progress"
 KIND_PATTERN = re.compile(r"[A-Za-z0-9_.-]+")
@@ -129,6 +130,7 @@ class Engine:
         timeout_s: int | None = None,
         shadow: bool = False,
         retry_policy: str | RetryPolicy | None = None,
+        webhooks: dict[str, str] | None = None,
     ) -> UUID:
         """Enqueue a job for processing and return its identifier.
 
@@ -179,6 +181,9 @@ class Engine:
                 )
             parse_policy(retry_policy)  # eager validation
             payload = {**payload, RETRY_POLICY_PAYLOAD_KEY: retry_policy}
+        normalized_webhooks = normalize_webhooks(webhooks)
+        if normalized_webhooks:
+            payload = {**payload, WEBHOOK_PAYLOAD_KEY: normalized_webhooks}
         await self._wait_for_capacity()
         job_id = await self.backend.enqueue(
             kind=kind,

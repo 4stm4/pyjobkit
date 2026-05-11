@@ -28,6 +28,8 @@ from .retry import (
     RetryPolicy,
     parse_policy,
 )
+from .webhooks import WEBHOOK_PAYLOAD_KEY
+from . import webhooks as _webhooks
 
 LeaseLostCallback = Callable[[UUID, dict], Awaitable[None]]
 
@@ -213,6 +215,36 @@ class Worker:
             self._sem.release()
             self._decrement_active()
 
+    async def _fire_webhook(
+        self,
+        webhooks_spec: dict[str, str] | None,
+        *,
+        status: str,
+        job_id: UUID,
+        kind: str,
+        attempts: int,
+        started_at: float | None,
+        result: Any,
+    ) -> None:
+        if not webhooks_spec:
+            return
+        from time import perf_counter
+
+        duration_ms = (
+            round((perf_counter() - started_at) * 1000, 3)
+            if started_at is not None
+            else None
+        )
+        await _webhooks.fire(
+            webhooks=webhooks_spec,
+            status=status,
+            job_id=job_id,
+            kind=kind,
+            attempts=attempts,
+            duration_ms=duration_ms,
+            result=result,
+        )
+
     def _log_state(
         self,
         event: str,
@@ -249,6 +281,7 @@ class Worker:
             return
         raw_payload = row["payload"]
         is_shadow = bool(raw_payload.get(SHADOW_PAYLOAD_KEY))
+        webhooks_spec = raw_payload.get(WEBHOOK_PAYLOAD_KEY) or None
         per_job_policy_spec = raw_payload.get(RETRY_POLICY_PAYLOAD_KEY)
         retry_policy = self.retry_policy
         if per_job_policy_spec:
@@ -263,7 +296,11 @@ class Worker:
         payload = {
             k: v
             for k, v in raw_payload.items()
-            if k not in (SHADOW_PAYLOAD_KEY, RETRY_POLICY_PAYLOAD_KEY)
+            if k not in (
+                SHADOW_PAYLOAD_KEY,
+                RETRY_POLICY_PAYLOAD_KEY,
+                WEBHOOK_PAYLOAD_KEY,
+            )
         }
         ctx = self.engine.make_ctx(job_id, is_shadow=is_shadow)
         expected_version = row.get("version")
@@ -334,6 +371,15 @@ class Worker:
                     started_at=started_at,
                     shadow=True,
                 )
+                await self._fire_webhook(
+                    webhooks_spec,
+                    status="success",
+                    job_id=job_id,
+                    kind=row["kind"],
+                    attempts=(row.get("attempts") or 0) + 1,
+                    started_at=started_at,
+                    result=shadow_result,
+                )
             else:
                 await self.engine.succeed(
                     job_id, result, expected_version=expected_version
@@ -343,6 +389,15 @@ class Worker:
                     job_id=job_id,
                     status="success",
                     started_at=started_at,
+                )
+                await self._fire_webhook(
+                    webhooks_spec,
+                    status="success",
+                    job_id=job_id,
+                    kind=row["kind"],
+                    attempts=(row.get("attempts") or 0) + 1,
+                    started_at=started_at,
+                    result=result,
                 )
         except asyncio.TimeoutError:
             exec_task.cancel()
@@ -358,6 +413,15 @@ class Worker:
                     status="timeout",
                     started_at=started_at,
                     attempts=attempts,
+                )
+                await self._fire_webhook(
+                    webhooks_spec,
+                    status="timeout",
+                    job_id=job_id,
+                    kind=row["kind"],
+                    attempts=attempts,
+                    started_at=started_at,
+                    result={"error": "timeout"},
                 )
             else:
                 delay = retry_policy.delay(attempts)
@@ -410,7 +474,8 @@ class Worker:
         except Exception as exc:  # pragma: no cover - defensive
             attempts = (row.get("attempts") or 0) + 1
             if attempts >= row.get("max_attempts", 3):
-                await self.engine.fail(job_id, {"error": repr(exc)}, expected_version=expected_version)
+                fail_result = {"error": repr(exc)}
+                await self.engine.fail(job_id, fail_result, expected_version=expected_version)
                 self._log_state(
                     "job.failed",
                     job_id=job_id,
@@ -418,6 +483,15 @@ class Worker:
                     started_at=started_at,
                     attempts=attempts,
                     exception_type=type(exc).__name__,
+                )
+                await self._fire_webhook(
+                    webhooks_spec,
+                    status="failed",
+                    job_id=job_id,
+                    kind=row["kind"],
+                    attempts=attempts,
+                    started_at=started_at,
+                    result=fail_result,
                 )
             else:
                 delay = retry_policy.delay(attempts)
