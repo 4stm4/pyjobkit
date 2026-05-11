@@ -682,7 +682,7 @@ class Worker:
             return {"status": "unhealthy", "reason": repr(exc)}
 
         depth = await self.engine.queue_depth()
-        overflow = self.queue_capacity is not None and depth > self.queue_capacity
+        overflow = self.queue_capacity is not None and depth >= self.queue_capacity
         status = "unhealthy" if overflow else "healthy"
         return {
             "status": status,

@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 from uuid import UUID, uuid4
 
-from ..contracts import QueueBackend
+from ..contracts import OptimisticLockError, QueueBackend
 
 
 UTC = timezone.utc
@@ -153,9 +153,14 @@ class MemoryBackend(QueueBackend):
     ) -> None:
         async with self._lock:
             job = self._jobs[job_id]
-            if job.leased_by == worker_id and (
-                expected_version is None or job.version == expected_version
+            if (
+                expected_version is not None
+                and job.version != expected_version
             ):
+                raise OptimisticLockError(
+                    f"extend_lease failed for {job_id} due to version mismatch"
+                )
+            if job.leased_by == worker_id:
                 job.lease_until = datetime.now(UTC) + timedelta(seconds=ttl_s)
 
     async def succeed(
@@ -244,7 +249,9 @@ class MemoryBackend(QueueBackend):
         async with self._lock:
             job = self._jobs[job_id]
             if expected_version is not None and job.version != expected_version:
-                return
+                raise OptimisticLockError(
+                    f"finish failed for {job_id} due to version mismatch"
+                )
             job.status = status
             job.finished_at = datetime.now(UTC)
             job.result = result

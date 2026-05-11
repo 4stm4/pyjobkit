@@ -155,10 +155,19 @@ def test_optimistic_lock_prevents_double_completion() -> None:
         version_at_claim = claimed[0]["version"]
 
         # Two workers race to mark the same job done with the same version.
-        await asyncio.gather(
+        from pyjobkit.contracts import OptimisticLockError
+
+        # One of the two finalize calls observes a stale expected_version
+        # and raises; the other applies cleanly.
+        results = await asyncio.gather(
             backend.succeed(job_id, {"a": 1}, expected_version=version_at_claim),
             backend.succeed(job_id, {"a": 2}, expected_version=version_at_claim),
+            return_exceptions=True,
         )
+        errors = [r for r in results if isinstance(r, BaseException)]
+        successes = [r for r in results if not isinstance(r, BaseException)]
+        assert len(errors) == 1 and isinstance(errors[0], OptimisticLockError)
+        assert len(successes) == 1
         rec = await backend.get(job_id)
         assert rec["status"] == "success"
         # Only one of the two writes should have been applied.

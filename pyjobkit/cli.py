@@ -139,9 +139,12 @@ async def _run_worker(args: argparse.Namespace) -> None:
         start_metrics_server(args.metrics_port, host=args.metrics_host)
     worker: Worker | None = None
     stopped = False
+    engine = None
     try:
         engine = create_async_engine(config.dsn)
     except SQLAlchemyError as exc:
+        raise CLIError(f"Failed to create engine for DSN {config.dsn!r}: {exc}") from exc
+    except Exception as exc:  # malformed DSN, missing driver, etc.
         raise CLIError(f"Failed to create engine for DSN {config.dsn!r}: {exc}") from exc
 
     try:
@@ -194,7 +197,9 @@ async def _run_worker(args: argparse.Namespace) -> None:
             worker.request_stop()
             with suppress(Exception):
                 await worker.wait_stopped()
-        await engine.dispose()
+        if engine is not None:
+            with suppress(Exception):
+                await engine.dispose()
 
 
 def main() -> None:
