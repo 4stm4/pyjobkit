@@ -32,6 +32,45 @@ def test_enqueue_many_returns_ids_in_order() -> None:
     asyncio.run(_run())
 
 
+def test_enqueue_many_uses_backend_bulk_path() -> None:
+    async def _run() -> None:
+        backend = MemoryBackend()
+        engine = Engine(backend=backend, executors=[_Noop()])
+        ids = await engine.enqueue_many(
+            [
+                {"kind": "noop", "payload": {"i": i}}
+                for i in range(5)
+            ]
+        )
+        assert len(ids) == 5
+        # All persisted.
+        for jid in ids:
+            rec = await backend.get(jid)
+            assert rec["status"] == "queued"
+
+    asyncio.run(_run())
+
+
+def test_enqueue_many_falls_back_when_payload_uses_markers() -> None:
+    async def _run() -> None:
+        backend = MemoryBackend()
+        engine = Engine(backend=backend, executors=[_Noop()])
+        ids = await engine.enqueue_many(
+            [
+                {"kind": "noop", "payload": {"i": 0}, "tags": ["hi"]},
+                {"kind": "noop", "payload": {"i": 1}, "shadow": True},
+            ]
+        )
+        assert len(ids) == 2
+        # Tags / shadow markers must have been written to payload.
+        rec0 = await backend.get(ids[0])
+        assert "__pjk_tags" in rec0["payload"]
+        rec1 = await backend.get(ids[1])
+        assert rec1["payload"]["__pjk_shadow"] is True
+
+    asyncio.run(_run())
+
+
 def test_enqueue_many_empty_returns_empty_list() -> None:
     async def _run() -> None:
         engine = Engine(backend=MemoryBackend(), executors=[_Noop()])

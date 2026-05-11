@@ -21,6 +21,11 @@ from typing import Awaitable, Callable
 
 from .contracts import OptimisticLockError
 from .engine import Engine, SHADOW_PAYLOAD_KEY, TAGS_PAYLOAD_KEY
+from .tracing import (
+    TRACE_CONTEXT_PAYLOAD_KEY,
+    restore_trace_context,
+    span as _trace_span,
+)
 from .ratelimit import RateLimitSpec, TokenBucket, parse_rate_limits
 from .retry import (
     DEFAULT_RETRY_POLICY,
@@ -322,6 +327,15 @@ class Worker:
         logger.info("job state changed", extra=payload)
 
     async def _execute_row(self, row: dict[str, Any]) -> None:
+        with restore_trace_context(row.get("payload") or {}):
+            with _trace_span(
+                "pyjobkit.execute",
+                kind=row.get("kind"),
+                job_id=str(row.get("id")),
+            ):
+                await self._execute_row_traced(row)
+
+    async def _execute_row_traced(self, row: dict[str, Any]) -> None:
         job_id = UUID(row["id"]) if not isinstance(row["id"], UUID) else row["id"]
         executor = self.engine.executor_for(row["kind"])
         if executor is None:
@@ -357,6 +371,7 @@ class Worker:
                 RETRY_POLICY_PAYLOAD_KEY,
                 WEBHOOK_PAYLOAD_KEY,
                 TAGS_PAYLOAD_KEY,
+                TRACE_CONTEXT_PAYLOAD_KEY,
             )
         }
         ctx = self.engine.make_ctx(job_id, is_shadow=is_shadow)

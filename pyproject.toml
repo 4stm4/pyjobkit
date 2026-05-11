@@ -17,6 +17,7 @@ metrics = ["prometheus_client>=0.20"]
 docker = ["aiodocker>=0.21"]
 fastapi = ["fastapi>=0.110", "pydantic>=2.0"]
 redis = ["redis>=5.0"]
+otel = ["opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20"]
 
 [project.scripts]
 pyjobkit = "pyjobkit.cli:main"

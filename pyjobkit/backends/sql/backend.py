@@ -74,6 +74,42 @@ class SQLBackend(QueueBackend):
             await session.commit()
         return job_id
 
+    async def enqueue_many(self, jobs: Iterable[dict]) -> list[UUID]:
+        """Insert several jobs in a single round trip.
+
+        Each entry is a kwargs mapping accepted by :meth:`enqueue`. The
+        method generates the ids server-side (UUID4) and persists them
+        through a single ``INSERT ... VALUES (...), (...), ...`` so
+        producers that batch their work avoid per-row latency.
+        """
+
+        rows = []
+        ids: list[UUID] = []
+        now = datetime.now(UTC)
+        for spec in jobs:
+            job_id = uuid4()
+            ids.append(job_id)
+            rows.append(
+                dict(
+                    id=str(job_id),
+                    status="queued",
+                    created_at=now,
+                    scheduled_for=spec.get("scheduled_for") or now,
+                    max_attempts=spec.get("max_attempts", 3),
+                    priority=spec.get("priority", 100),
+                    kind=spec["kind"],
+                    payload=spec.get("payload", {}),
+                    idempotency_key=spec.get("idempotency_key"),
+                    timeout_s=spec.get("timeout_s"),
+                )
+            )
+        if not rows:
+            return []
+        async with self.sessionmaker() as session:
+            await session.execute(JobTasks.insert(), rows)
+            await session.commit()
+        return ids
+
     async def get(self, job_id: UUID) -> dict:
         async with self.sessionmaker() as session:
             row = (

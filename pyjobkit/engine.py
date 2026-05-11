@@ -22,6 +22,7 @@ from .contracts import EventBus, ExecContext, Executor, LogRecord, LogSink, Queu
 from .events.local import LocalEventBus
 from .logging.memory import MemoryLogSink
 from .retry import RETRY_POLICY_PAYLOAD_KEY, RetryPolicy, parse_policy
+from .tracing import inject_trace_context, span as _trace_span
 from .types import FailureReason, JobRecord, JobResult
 from .webhooks import WEBHOOK_PAYLOAD_KEY, normalize_webhooks
 
@@ -159,6 +160,9 @@ class Engine:
             UUID: The identifier of the enqueued job.
         """
 
+        # Trace span wraps the entire enqueue path; the produced
+        # trace context is injected into the payload below so workers
+        # can re-parent their own spans to it.
         if self._router is not None:
             routed = self._router(kind, payload)
             if asyncio.iscoroutine(routed):
@@ -199,32 +203,55 @@ class Engine:
             tag_list = sorted({str(t).strip() for t in tags if str(t).strip()})
             if tag_list:
                 payload = {**payload, TAGS_PAYLOAD_KEY: tag_list}
-        await self._wait_for_capacity()
-        job_id = await self.backend.enqueue(
-            kind=kind,
-            payload=payload,
-            priority=priority,
-            scheduled_for=scheduled_for,
-            max_attempts=max_attempts,
-            idempotency_key=idempotency_key,
-            timeout_s=timeout_s,
-        )
-        logger.info("enqueue accepted: job_id=%s kind=%s priority=%s", job_id, kind, priority)
+        with _trace_span("pyjobkit.enqueue", kind=kind, priority=priority):
+            payload = inject_trace_context(payload)
+            await self._wait_for_capacity()
+            job_id = await self.backend.enqueue(
+                kind=kind,
+                payload=payload,
+                priority=priority,
+                scheduled_for=scheduled_for,
+                max_attempts=max_attempts,
+                idempotency_key=idempotency_key,
+                timeout_s=timeout_s,
+            )
+            logger.info(
+                "enqueue accepted: job_id=%s kind=%s priority=%s",
+                job_id,
+                kind,
+                priority,
+            )
         return job_id
 
     async def enqueue_many(self, jobs: Iterable[dict[str, Any]]) -> list[UUID]:
         """Enqueue a batch of jobs and return their ids in the same order.
 
-        Each entry is a kwargs mapping accepted by :meth:`enqueue`. The
-        operation goes through :meth:`enqueue` per row (so shadow / tags
-        / webhooks / retry_policy markers are applied uniformly), but
-        the backend may amortise the round trips internally when it
-        provides a ``enqueue_many`` method.
+        Each entry is a kwargs mapping accepted by :meth:`enqueue`. If
+        any entry uses payload markers (shadow / tags / webhooks /
+        retry_policy) the call falls back to per-row :meth:`enqueue` so
+        the markers are applied. Otherwise the backend's
+        ``enqueue_many`` is used for a single round trip when
+        available.
         """
 
         jobs_list = list(jobs)
         if not jobs_list:
             return []
+
+        marker_keys = {"shadow", "retry_policy", "webhooks", "tags"}
+        needs_markers = any(any(k in spec for k in marker_keys) for spec in jobs_list)
+        bulk = getattr(self.backend, "enqueue_many", None)
+        if not needs_markers and self._router is None and bulk is not None:
+            for spec in jobs_list:
+                if not KIND_PATTERN.fullmatch(spec.get("kind", "")):
+                    raise ValueError(
+                        "kind must contain only alphanumerics, dash, underscore, or dot"
+                    )
+                if "max_attempts" not in spec:
+                    spec["max_attempts"] = self.default_max_attempts
+            await self._wait_for_capacity()
+            return await bulk(jobs_list)
+
         return [await self.enqueue(**spec) for spec in jobs_list]
 
     async def enqueue_at(

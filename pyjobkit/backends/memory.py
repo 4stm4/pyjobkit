@@ -88,6 +88,38 @@ class MemoryBackend(QueueBackend):
             self._jobs[job_id] = job
             return job_id
 
+    async def enqueue_many(self, jobs) -> list[UUID]:
+        """Bulk enqueue under a single lock acquisition."""
+
+        out: list[UUID] = []
+        async with self._lock:
+            for spec in jobs:
+                idem = spec.get("idempotency_key")
+                if idem:
+                    existing = next(
+                        (j for j in self._jobs.values() if j.idempotency_key == idem),
+                        None,
+                    )
+                    if existing is not None:
+                        out.append(existing.id)
+                        continue
+                job_id = uuid4()
+                now = datetime.now(UTC)
+                job = _Job(
+                    id=job_id,
+                    created_at=now,
+                    scheduled_for=spec.get("scheduled_for") or now,
+                    max_attempts=spec.get("max_attempts", 3),
+                    priority=spec.get("priority", 100),
+                    kind=spec["kind"],
+                    payload=spec.get("payload", {}),
+                    idempotency_key=idem,
+                    timeout_s=spec.get("timeout_s"),
+                )
+                self._jobs[job_id] = job
+                out.append(job_id)
+        return out
+
     async def get(self, job_id: UUID) -> dict:
         async with self._lock:
             job = self._jobs.get(job_id)
