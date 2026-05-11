@@ -183,7 +183,11 @@ async def _run_worker(args: argparse.Namespace) -> None:
             executors.append(_load_executor(config.default_executor))
         for dotted_path in config.extra_executors:
             executors.append(_load_executor(dotted_path))
-        eng = Engine(backend=backend, executors=executors)
+        eng = Engine(
+            backend=backend,
+            executors=executors,
+            default_max_attempts=config.max_attempts,
+        )
         if config.enable_plugins:
             registered = eng.register_plugins()
             if registered:

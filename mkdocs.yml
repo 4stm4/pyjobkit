@@ -34,6 +34,8 @@ nav:
   - Home: index.md
   - Getting started: getting-started.md
   - Configuration: configuration.md
+  - Production deployment: production.md
+  - Cancellation: cancellation.md
   - Extending Pyjobkit: extending.md
   - API reference: api.md
   - Stability policy: stability.md

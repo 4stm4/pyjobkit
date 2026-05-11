@@ -1,6 +1,40 @@
 
 ## Unreleased
 
+* **Production hardening (round A)** - SIGTERM/SIGINT handlers in the
+  worker CLI for graceful shutdown, `async with` support on `Engine`
+  and `Worker`, single-shot guard on `Worker.run` (raises on reuse),
+  and async-callable routers.
+
+* **Bulk enqueue and retry-age cap (round B)** - `Engine.enqueue_many`
+  for batched producers; `RetryPolicy.give_up_after_age_s` plus
+  worker-side enforcement so runaway exponential backoffs are bounded
+  by wall-clock age, not just `max_attempts`. `parse_policy` accepts
+  `key=value` suffixes.
+
+* **Security hardening (round C)** - `SubprocessExecutor` allowlist
+  (`allowed_commands=[...]`) plus a one-shot warning when running
+  unrestricted; webhook HMAC signing via `PYJOBKIT_WEBHOOK_SECRET`
+  with `X-Pyjobkit-Signature` header and exponential-backoff retry;
+  `pyjobkit_webhook_failures_total` Prometheus counter; FastAPI router
+  accepts `dependencies=[Depends(...)]` for endpoint-wide auth.
+
+* **Operations (round D)** - `pyjobkit-migrate` console script with a
+  bundled `alembic.ini`, baseline migration, and async-DSN rewrite;
+  `pyjobkit-prune` plus `Engine.purge_finished` on memory and SQL
+  backends for retention; subprocess test flakes replaced with
+  deterministic polling, so the full suite runs without `--deselect`.
+
+* **CI / community / docs (round E)** - new
+  `.github/workflows/postgres.yml` boots a Postgres service and runs
+  the SQL backend / integration tests against it. `SECURITY.md`,
+  `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` added. `docs/production.md`
+  covers schema, shutdown, retention, observability, rate limits, and
+  Postgres tips; `docs/cancellation.md` documents the cooperative
+  cancellation contract. Worker CLI now actually applies the
+  configured `max_attempts` via a new `Engine.default_max_attempts`
+  argument (the flag was previously parsed but ignored).
+
 * **Bundled HTML dashboard + TypeScript client** (closes #55, #71)
   `pyjobkit.integrations.ui.mount_dashboard(app, api_prefix, ui_path)`
   serves a single-page dashboard (status filter, cancel-in-place, 5s

@@ -96,9 +96,11 @@ class Engine:
         enqueue_timeout_s: float | None = None,
         enqueue_check_interval_s: float = 0.1,
         exec_context_factory: ExecContextFactory | None = None,
+        default_max_attempts: int = 3,
     ) -> None:
         self.backend = backend
         self.executors: dict[str, Executor] = {}
+        self.default_max_attempts = int(default_max_attempts)
         for executor in executors:
             self.register_executor(executor)
         self.log_sink = log_sink or MemoryLogSink()
@@ -129,7 +131,7 @@ class Engine:
         payload: dict,
         priority: int = 100,
         scheduled_for: datetime | None = None,
-        max_attempts: int = 3,
+        max_attempts: int | None = None,
         idempotency_key: str | None = None,
         timeout_s: int | None = None,
         shadow: bool = False,
@@ -177,6 +179,8 @@ class Engine:
             idempotency_key,
             shadow,
         )
+        if max_attempts is None:
+            max_attempts = self.default_max_attempts
         if shadow:
             payload = {**payload, SHADOW_PAYLOAD_KEY: True}
         if retry_policy is not None:

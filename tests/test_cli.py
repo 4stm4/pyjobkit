@@ -45,7 +45,7 @@ def test_run_worker_builds_components(monkeypatch) -> None:
                 created["backend"] = (engine, prefer_pg_skip_locked, lease_ttl_s)
 
         class FakeEngine:
-            def __init__(self, *, backend, executors):
+            def __init__(self, *, backend, executors, **kwargs):
                 created["engine"] = (backend, tuple(type(e).__name__ for e in executors))
 
         class FakeWorker:
@@ -175,7 +175,7 @@ def test_cli_module_entrypoint(monkeypatch) -> None:
             created["backend"] = (engine, prefer_pg_skip_locked, lease_ttl_s)
 
     class FakeEngine:
-        def __init__(self, *, backend, executors):
+        def __init__(self, *, backend, executors, **kwargs):
             created["engine"] = backend
 
     class FakeWorker:
@@ -251,7 +251,7 @@ def test_run_worker_requests_stop_on_cancel(monkeypatch) -> None:
                 events.append("backend")
 
         class FakeEngineWrapper:
-            def __init__(self, *, backend, executors):
+            def __init__(self, *, backend, executors, **kwargs):
                 events.append("engine")
 
         class FakeWorker:
