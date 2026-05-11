@@ -109,6 +109,28 @@ def make_router(engine: Engine, *, prefix: str = ""):  # type: ignore[no-untyped
         )
         return EnqueueResponse(job_id=job_id)
 
+    @router.get("/jobs", response_model=list[JobRecordResponse])
+    async def list_jobs(status: str | None = None, limit: int = 100) -> list[JobRecordResponse]:
+        all_jobs = getattr(engine.backend, "all_jobs", None)
+        if all_jobs is None:
+            raise HTTPException(
+                status_code=501,
+                detail="Listing is only available on backends that implement all_jobs()",
+            )
+        records = await all_jobs()
+        if status:
+            records = [r for r in records if r.get("status") == status]
+        records = records[:limit]
+        out: list[JobRecordResponse] = []
+        for r in records:
+            jid = r.get("id")
+            if not isinstance(jid, UUID):
+                jid = UUID(str(jid))
+            out.append(
+                JobRecordResponse(id=jid, **{k: v for k, v in r.items() if k != "id"})
+            )
+        return out
+
     @router.get("/jobs/{job_id}", response_model=JobRecordResponse)
     async def get_job(job_id: UUID) -> JobRecordResponse:
         try:

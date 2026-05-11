@@ -1,6 +1,15 @@
 
 ## Unreleased
 
+* **Bundled HTML dashboard + TypeScript client** (closes #55, #71)
+  `pyjobkit.integrations.ui.mount_dashboard(app, api_prefix, ui_path)`
+  serves a single-page dashboard (status filter, cancel-in-place, 5s
+  auto-refresh) that talks to the REST API. The FastAPI router now
+  also exposes `GET /jobs?status=&limit=` for backends that implement
+  `all_jobs()` (`MemoryBackend` today). Added `ts/pyjobkit.d.ts` and a
+  matching `ts/pyjobkit.js` fetch client so external UIs can integrate
+  without re-deriving the API shape.
+
 * **Redis backend (preview)** (closes #50)
   New `pyjobkit.backends.redis.RedisBackend` implements `QueueBackend`
   using a Redis ZSET ready queue, per-job hashes, and a leased ZSET
