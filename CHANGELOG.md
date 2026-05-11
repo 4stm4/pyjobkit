@@ -1,6 +1,13 @@
 
 ## Unreleased
 
+* **mkdocs documentation scaffolding** (closes #66)
+  Added `mkdocs.yml` plus structured pages (`docs/index.md`,
+  `getting-started.md`, `configuration.md`, `extending.md`, `api.md`,
+  `faq.md`). A `.github/workflows/docs.yml` workflow builds the site
+  with mkdocs-material and deploys to GitHub Pages on every `main`
+  merge.
+
 * **`pyjobkit-simulate` console script** (closes #69)
   Run a list of jobs described in JSON (or YAML, when PyYAML is
   installed) against the in-memory backend, then print a per-status
