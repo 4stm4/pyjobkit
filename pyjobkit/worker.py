@@ -17,6 +17,8 @@ from time import perf_counter
 from typing import Any
 from uuid import UUID, uuid4
 
+from typing import Awaitable, Callable
+
 from .contracts import OptimisticLockError
 from .engine import Engine, SHADOW_PAYLOAD_KEY
 from .ratelimit import RateLimitSpec, TokenBucket, parse_rate_limits
@@ -26,6 +28,8 @@ from .retry import (
     RetryPolicy,
     parse_policy,
 )
+
+LeaseLostCallback = Callable[[UUID, dict], Awaitable[None]]
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +52,7 @@ class Worker:
         retry_policy: RetryPolicy | str | None = None,
         watchdog_interval_s: float | None = None,
         rate_limits: dict | None = None,
+        on_lease_lost: LeaseLostCallback | None = None,
     ) -> None:
         self.engine = engine
         self.max_concurrency = max_concurrency
@@ -75,6 +80,7 @@ class Worker:
             kind: TokenBucket(rate, burst)
             for kind, (rate, burst) in normalized_limits.items()
         }
+        self.on_lease_lost = on_lease_lost
         self.worker_id = uuid4()
         self._stop = asyncio.Event()
         self._stopped = asyncio.Event()
@@ -325,6 +331,16 @@ class Worker:
                 status="running",
                 started_at=started_at,
             )
+            if self.on_lease_lost is not None:
+                try:
+                    await self.on_lease_lost(job_id, dict(row))
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.warning(
+                        "on_lease_lost callback raised for job %s: %s",
+                        job_id,
+                        exc,
+                        exc_info=True,
+                    )
             return
         except asyncio.CancelledError:
             self._log_state(

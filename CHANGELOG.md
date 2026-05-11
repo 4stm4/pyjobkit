@@ -1,6 +1,16 @@
 
 ## Unreleased
 
+* **Closes #54** - duplicate of #53 ("Поддержка тегов и фильтрации");
+  the tagging implementation in #53 covers both issues.
+
+* **Lease-loss handling hook** (closes #62)
+  Worker already raised `LeaseLostError` when its lease evaporated and
+  awaited the `lease_lost.wait()` task; expose this transition to
+  callers via an optional `on_lease_lost(job_id, row)` async callback so
+  applications can record metrics, page operators, or hand off to a
+  cleanup queue.
+
 * **Per-kind rate limiting** (closes #73)
   Worker accepts a `rate_limits` mapping of `{kind: {max_per_second,
   burst}}`; each entry installs an async token-bucket consulted before
