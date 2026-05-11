@@ -147,6 +147,21 @@ await backend.clear()
 All state lives in process memory and is dropped when the process
 exits - do not use this backend for durable workloads.
 
+## Docker
+
+A minimal worker image is provided in [`Dockerfile`](Dockerfile):
+
+```bash
+docker build -t pyjobkit/worker:dev .
+docker run --rm \
+  -e PYJOBKIT_DSN=postgresql+asyncpg://user:pass@host/db \
+  pyjobkit/worker:dev
+```
+
+The image installs `pyjobkit` with the `asyncpg` and `aiosqlite`
+drivers; configuration is read from `PYJOBKIT_*` environment variables
+or a TOML file mounted into the container.
+
 ## Comparison with other Python job libraries
 
 See [docs/comparison.md](docs/comparison.md) for a head-to-head

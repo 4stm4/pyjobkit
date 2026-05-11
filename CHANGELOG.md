@@ -1,6 +1,13 @@
 
 ## Unreleased
 
+* **Worker Docker image** (closes #60)
+  Added a two-stage `Dockerfile` that builds a wheel and installs it
+  into a slim Python image as the `pyjobkit` user. `ENTRYPOINT
+  ["pyjobkit"]` so containers can be configured purely through
+  `PYJOBKIT_*` environment variables; `asyncpg` and `aiosqlite` ship in
+  the runtime layer.
+
 * **CI integration example** (closes #70)
   Added `.github/workflows/example-integration.yml` plus
   `examples/ci_integration.py` - a self-contained script that exercises
