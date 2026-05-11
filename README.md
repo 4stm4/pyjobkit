@@ -7,17 +7,19 @@
 Pyjobkit is a backend-agnostic toolkit for building reliable asynchronous job processing systems. It provides an `Engine` facade for enqueueing work, a cooperative asyncio `Worker`, a set of executor contracts, and pluggable queue backends so you can adapt the runtime to your infrastructure with minimal glue code.
 
 ## Features
-- **Backends** – SQL (`SQLBackend`, Postgres / MySQL / SQLite via SQLAlchemy) for production, `MemoryBackend` for tests, optional `RedisBackend` (preview). All implement the same `QueueBackend` ABC.
-- **Async worker** – `Worker` built on `asyncio.TaskGroup` with concurrency limits, batch polling, lease extension, optimistic locking, configurable watchdog, and an optional heartbeat callback.
-- **Executors** – `SubprocessExecutor`, `HttpExecutor`, and an optional `DockerExecutor`. Custom executors implement `Executor`; third-party packages can register via the `pyjobkit.executors` entry-point group.
-- **Retry policies** – `FixedDelay` / `ExponentialBackoff` / `JitteredExponentialBackoff`, configurable per worker or per job.
-- **Scheduling** – `Engine.enqueue_at(when)` / `enqueue_in(delay)`, plus job-level `tags`, `shadow` (dry-run), and per-job `retry_policy` overrides.
-- **Routing** – `Engine.set_router(callable)` rewrites kinds based on payload; `Worker(kinds=..., tags=...)` filters claimed jobs.
-- **Rate limiting** – per-kind token bucket configured via the worker, the CLI, or TOML.
-- **Observability** – JSON log formatter (`pyjobkit.logging.JsonFormatter`), `ctx.profile_phase(...)`, Prometheus `/metrics` exporter, webhook notifications on terminal states.
-- **CLI** – `pyjobkit` (worker with `--once`, `--kind`, `--config`, `--log-format`, etc.) and `pyjobkit-simulate` (run a JSON job file against the in-memory backend).
-- **REST + dashboard** – optional FastAPI router (`pyjobkit.integrations.fastapi.make_router`) plus a bundled HTML dashboard and a TypeScript client (`ts/`).
-- **Typed API** – `py.typed` marker, public `TypedDict`s (`JobRecord`, `JobResult`, `FailureReason`), `JobStatus` / `LogStream` literals.
+- **Backends** - SQL (`SQLBackend`, Postgres / MySQL / SQLite via SQLAlchemy) for production, `MemoryBackend` for tests, optional `RedisBackend` (preview). All implement the same `QueueBackend` ABC.
+- **Async worker** - `Worker` built on `asyncio.TaskGroup` with concurrency limits, batch polling, lease extension, optimistic locking, configurable watchdog, optional heartbeat callback, and SIGTERM / SIGINT graceful shutdown.
+- **Executors** - `SubprocessExecutor` (with optional command allowlist), `HttpExecutor`, and an optional `DockerExecutor`. Custom executors implement `Executor`; third-party packages can register via the `pyjobkit.executors` entry-point group.
+- **Retry policies** - `FixedDelay` / `ExponentialBackoff` / `JitteredExponentialBackoff`, configurable per worker or per job, with an optional wall-clock `give_up_after_age_s` cap.
+- **Scheduling** - `Engine.enqueue_at(when)` / `enqueue_in(delay)` for delayed jobs, `pyjobkit.scheduler.Scheduler` for periodic enqueues, plus job-level `tags`, `shadow` (dry-run), and per-job `retry_policy` overrides.
+- **Workflows** - `Engine.chain(step_a, step_b, ...)` runs steps sequentially and threads the previous result through `payload["previous_result"]`; `Engine.enqueue_many(...)` bulk-inserts a batch in one round trip.
+- **Routing** - `Engine.set_router(callable)` (sync or async) rewrites kinds based on payload; `Worker(kinds=..., tags=...)` filters claimed jobs.
+- **Rate limiting** - per-kind token bucket configured via the worker, the CLI, or TOML.
+- **Observability** - JSON log formatter (`pyjobkit.logging.JsonFormatter`), `ctx.profile_phase(...)`, Prometheus `/metrics` exporter, optional OpenTelemetry spans on enqueue / execute (with W3C trace context propagation through the payload), and webhook notifications on terminal states (HMAC-signed when `PYJOBKIT_WEBHOOK_SECRET` is set).
+- **CLI** - `pyjobkit` (worker with `--once`, `--kind`, `--config`, `--log-format`, etc.), `pyjobkit-simulate` (run a JSON job file against the in-memory backend), `pyjobkit-migrate` (Alembic migrations), and `pyjobkit-prune` (retention).
+- **REST + dashboard** - optional FastAPI router (`pyjobkit.integrations.fastapi.make_router` with a `dependencies=[Depends(...)]` auth hook) plus a bundled HTML dashboard and a TypeScript client (`ts/`).
+- **Typed API** - `py.typed` marker, public `TypedDict`s (`JobRecord`, `JobResult`, `FailureReason`), `JobStatus` / `LogStream` literals.
+- **Deployment assets** - Dockerfile, Helm chart (`deploy/helm/pyjobkit`), Grafana dashboard (`deploy/grafana/`).
 
 
 ## Installation
@@ -35,6 +37,7 @@ pip install "pyjobkit[redis]"     # RedisBackend (preview)
 pip install "pyjobkit[docker]"    # DockerExecutor
 pip install "pyjobkit[fastapi]"   # REST router + dashboard
 pip install "pyjobkit[metrics]"   # Prometheus /metrics exporter
+pip install "pyjobkit[otel]"      # OpenTelemetry spans
 ```
 
 ## Getting started
@@ -80,7 +83,16 @@ backend = SQLBackend(engine, prefer_pg_skip_locked=True, lease_ttl_s=60)
 ```
 
 ## SQL schema and migrations
-The SQL backend uses the `job_tasks` table defined in `pyjobkit.backends.sql.schema`. You can create it via SQLAlchemy:
+The SQL backend uses the `job_tasks` table defined in `pyjobkit.backends.sql.schema`. The bundled `pyjobkit-migrate` console script runs Alembic against the migrations shipped with the package:
+
+```bash
+pyjobkit-migrate --dsn postgresql+asyncpg://user:pass@host/db up
+pyjobkit-migrate --dsn postgresql+asyncpg://user:pass@host/db current
+```
+
+It accepts the async DSN forms (`postgresql+asyncpg`, `mysql+aiomysql`, `sqlite+aiosqlite`) and rewrites them to the matching sync drivers internally. The DSN may also come from `PYJOBKIT_DSN` or `.pyjobkit.toml`. Re-run `pyjobkit-migrate up` on every deploy; each minor release that touches the schema ships an Alembic revision.
+
+For quick prototyping you can still bootstrap the table via SQLAlchemy directly:
 
 ```python
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -90,8 +102,6 @@ engine = create_async_engine("postgresql+asyncpg://user:pass@host/db")
 async with engine.begin() as conn:
     await conn.run_sync(metadata.create_all)
 ```
-
-Manage migrations however you prefer (Alembic, plain SQL files, etc.)—only the schema in `schema.py` is required by Pyjobkit.
 
 ## Running the bundled worker CLI
 Once the schema exists, you can run the provided worker process:
@@ -106,9 +116,22 @@ pyjobkit --dsn postgresql+asyncpg://user:pass@host/db \
 
 Use `--disable-skip-locked` when targeting databases that do not support the Postgres-specific optimization. The CLI wires in the SQL backend plus the HTTP and subprocess executors, so jobs with `kind="http"` or `kind="subprocess"` will run out of the box.
 
+The worker installs SIGTERM / SIGINT handlers that call `worker.request_stop()`, so container runtimes (Kubernetes, Docker, systemd) get a clean drain on shutdown. Pass `--once` for a one-shot drain (useful for cron-style invocations) or `--kind` to restrict the worker to specific job kinds.
+
+### Retention
+
+The SQL backend keeps finished jobs forever unless you remove them. Run `pyjobkit-prune` on a schedule:
+
+```bash
+pyjobkit-prune --older-than 30d --statuses success,cancelled
+pyjobkit-prune --older-than 90d --statuses failed,timeout
+```
+
+`--older-than` accepts compact durations (`30d`, `24h`, `90m`, `60s`). Without it every terminal job in the chosen statuses is deleted.
+
 ### Configuration via TOML / environment
 
-CLI flags can be replaced (or supplemented) by a `.pyjobkit.toml` file in the working directory or by `PYJOBKIT_*` environment variables. Resolution order is **CLI flags → environment → TOML file → defaults**.
+CLI flags can be replaced (or supplemented) by a `.pyjobkit.toml` file in the working directory or by `PYJOBKIT_*` environment variables. Resolution order is **CLI flags -> environment -> TOML file -> defaults**.
 
 ```toml
 # .pyjobkit.toml
@@ -157,7 +180,7 @@ await backend.clear()
 All state lives in process memory and is dropped when the process
 exits - do not use this backend for durable workloads.
 
-## Docker
+## Docker and Kubernetes
 
 A minimal worker image is provided in [`Dockerfile`](Dockerfile):
 
@@ -172,20 +195,26 @@ The image installs `pyjobkit` with the `asyncpg` and `aiosqlite`
 drivers; configuration is read from `PYJOBKIT_*` environment variables
 or a TOML file mounted into the container.
 
+For Kubernetes a Helm chart is shipped in [`deploy/helm/pyjobkit`](deploy/helm/pyjobkit). It renders the Deployment, the DSN Secret, a pre-install migration Job (`pyjobkit-migrate up`), a `metrics` Service, and an optional `ServiceMonitor` for kube-prometheus-stack. See [`deploy/README.md`](deploy/README.md) for installation instructions and [`deploy/grafana/pyjobkit-dashboard.json`](deploy/grafana/pyjobkit-dashboard.json) for a ready-to-import Grafana dashboard.
+
+## Production deployment
+
+See [`docs/production.md`](docs/production.md) for guidance on schema migrations, graceful shutdown, retention, observability, rate limits, and Postgres tuning. [`docs/cancellation.md`](docs/cancellation.md) documents the cooperative cancellation contract. The full stability policy is in [`docs/stability.md`](docs/stability.md). Vulnerabilities should be reported per [`SECURITY.md`](SECURITY.md).
+
 ## Comparison with other Python job libraries
 
 See [docs/comparison.md](docs/comparison.md) for a head-to-head
 positioning against Celery, RQ, and Dramatiq.
 
 ## Extending Pyjobkit
-- **Custom executors** – Implement the `Executor` protocol, register instances when constructing the `Engine`, and leverage the `ExecContext` helpers (`log`, `set_progress`, `is_cancelled`).
-- **Alternate backends** – Implement the `QueueBackend` protocol to target message brokers or proprietary queues while reusing the worker and executor layers.
-- **Logging & events** – Swap the memory log sink or event bus with your own implementations (e.g., stream to Loki or publish over Redis) by passing them to the `Engine` constructor.
+- **Custom executors** - Implement the `Executor` protocol, register instances when constructing the `Engine`, and leverage the `ExecContext` helpers (`log`, `set_progress`, `is_cancelled`).
+- **Alternate backends** - Implement the `QueueBackend` protocol to target message brokers or proprietary queues while reusing the worker and executor layers.
+- **Logging & events** - Swap the memory log sink or event bus with your own implementations (e.g., stream to Loki or publish over Redis) by passing them to the `Engine` constructor.
 
 
 
 ## Examples
-- [`examples/taskboard`](examples/taskboard) – A single-page FastAPI dashboard that enqueues demo jobs which sleep for a random duration using the in-memory backend. Includes a Dockerfile for quick demos.
+- [`examples/taskboard`](examples/taskboard) - A single-page FastAPI dashboard that enqueues demo jobs which sleep for a random duration using the in-memory backend. Includes a Dockerfile for quick demos.
 
 ### Demo dashboard screenshot
 
@@ -221,7 +250,7 @@ docker compose up taskboard
 Below is a proven scenario for running the `examples/taskboard` demo stack on a host managed by Portainer.
 
 1. Make sure your Docker host (where Portainer agent or standalone daemon runs) has internet access for git and pip.
-2. In Portainer, go to **Stacks → Add stack → Web editor**.
+2. In Portainer, go to **Stacks -> Add stack -> Web editor**.
 3. Copy the contents of your updated `docker-compose.yml` (from this repository) into the editor. Make sure only the `taskboard` service is present in the YAML.
 4. Click **Deploy the stack**. Portainer will pull the official `python:3.13-slim` image, install dependencies, clone the repository, and start the FastAPI app.
 
