@@ -138,6 +138,15 @@ class Worker:
 
         await self._stopped.wait()
 
+    async def __aenter__(self) -> "Worker":
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        if not self._stopped.is_set():
+            self.request_stop()
+            with suppress(Exception):
+                await self.wait_stopped()
+
     async def run(self, *, once: bool = False) -> None:
         """Run the worker loop.
 
@@ -146,8 +155,16 @@ class Worker:
         only while jobs were claimed) and then exits gracefully. This
         is useful for batch / cron-style invocations that should finish
         when there is nothing left to do.
+
+        A worker instance is single-shot: once :meth:`run` has returned,
+        calling it again raises :class:`RuntimeError`. Spin up a fresh
+        :class:`Worker` for the next invocation.
         """
 
+        if self._stopped.is_set():
+            raise RuntimeError(
+                "Worker.run cannot be called twice; create a new Worker instance"
+            )
         backoff = self.poll_interval
         try:
             async with asyncio.TaskGroup() as tg:

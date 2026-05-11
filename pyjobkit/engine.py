@@ -7,13 +7,14 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import re
-from typing import Any, Callable, Iterable, Protocol
+from typing import Any, Awaitable, Callable, Iterable, Protocol, Union
 from uuid import UUID
 
-Router = Callable[[str, dict], str | None]
+Router = Callable[[str, dict], Union[str, None, Awaitable[Union[str, None]]]]
 """Signature for a routing function: ``(kind, payload) -> new_kind | None``.
 
-Returning a string overrides the ``kind`` used to dispatch the job. Returning
+The callable may be synchronous or return an awaitable. Returning a
+string overrides the ``kind`` used to dispatch the job. Returning
 ``None`` keeps the caller-supplied kind unchanged.
 """
 
@@ -158,6 +159,8 @@ class Engine:
 
         if self._router is not None:
             routed = self._router(kind, payload)
+            if asyncio.iscoroutine(routed):
+                routed = await routed
             if routed is not None and routed != kind:
                 logger.info(
                     "router rewrote kind: %s -> %s", kind, routed
@@ -479,4 +482,10 @@ class Engine:
                 result = close()
                 if asyncio.iscoroutine(result):
                     await result
+
+    async def __aenter__(self) -> "Engine":
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        await self.close()
 

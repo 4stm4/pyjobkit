@@ -70,6 +70,25 @@ def test_router_must_be_callable() -> None:
         engine.set_router("not callable")  # type: ignore[arg-type]
 
 
+def test_router_accepts_async_callable() -> None:
+    async def _run() -> None:
+        backend = MemoryBackend()
+        engine = Engine(backend=backend, executors=[_Noop()])
+
+        async def aroute(kind: str, payload: dict) -> str | None:
+            await asyncio.sleep(0)
+            return "noop" if payload.get("type") == "email" else None
+
+        engine.set_router(aroute)
+        job_id = await engine.enqueue(
+            kind="generic", payload={"type": "email"}
+        )
+        rec = await backend.get(job_id)
+        assert rec["kind"] == "noop"
+
+    asyncio.run(_run())
+
+
 def test_router_result_still_validated() -> None:
     async def _run() -> None:
         engine = Engine(backend=MemoryBackend(), executors=[_Noop()])

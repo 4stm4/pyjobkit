@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import importlib
 import logging
+import signal
 from contextlib import suppress
 import sys
 from typing import Callable
@@ -127,6 +128,30 @@ def _resolve_config(args: argparse.Namespace) -> Config:
         raise CLIError(str(exc)) from exc
 
 
+def _install_signal_handlers(worker: Worker) -> None:
+    """Wire SIGTERM / SIGINT to ``worker.request_stop`` for graceful shutdown.
+
+    On platforms where ``loop.add_signal_handler`` is unavailable
+    (e.g. Windows) the function silently no-ops and falls back to the
+    default exception-based handling.
+    """
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:  # pragma: no cover - defensive
+        return
+
+    def _handle(sig_name: str) -> None:
+        logger.info("received %s; requesting worker shutdown", sig_name)
+        worker.request_stop()
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, _handle, sig.name)
+        except (NotImplementedError, RuntimeError):  # pragma: no cover - Windows
+            logger.debug("signal %s not installable on this platform", sig.name)
+
+
 async def _run_worker(args: argparse.Namespace) -> None:
     config = _resolve_config(args)
     if not config.dsn:
@@ -178,6 +203,7 @@ async def _run_worker(args: argparse.Namespace) -> None:
             rate_limits=config.rate_limits,
             kinds=args.kind or None,
         )
+        _install_signal_handlers(worker)
         try:
             await worker.run(once=args.once)
         except asyncio.CancelledError:
