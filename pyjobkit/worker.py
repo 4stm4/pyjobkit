@@ -32,6 +32,7 @@ from .webhooks import WEBHOOK_PAYLOAD_KEY
 from . import webhooks as _webhooks
 
 LeaseLostCallback = Callable[[UUID, dict], Awaitable[None]]
+HeartbeatCallback = Callable[[UUID], Awaitable[None]]
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,8 @@ class Worker:
         on_lease_lost: LeaseLostCallback | None = None,
         kinds: Iterable[str] | None = None,
         tags: Iterable[str] | None = None,
+        heartbeat_interval_s: float | None = None,
+        on_heartbeat: HeartbeatCallback | None = None,
     ) -> None:
         self.engine = engine
         self.max_concurrency = max_concurrency
@@ -91,6 +94,12 @@ class Worker:
         self.tags: frozenset[str] | None = (
             frozenset(tags) if tags is not None else None
         )
+        if heartbeat_interval_s is not None and heartbeat_interval_s <= 0:
+            raise ValueError("heartbeat_interval_s must be > 0")
+        self.heartbeat_interval_s = (
+            float(heartbeat_interval_s) if heartbeat_interval_s is not None else None
+        )
+        self.on_heartbeat = on_heartbeat
         self.worker_id = uuid4()
         self._stop = asyncio.Event()
         self._stopped = asyncio.Event()
@@ -144,6 +153,8 @@ class Worker:
             async with asyncio.TaskGroup() as tg:
                 if not once:
                     tg.create_task(self._reap_loop())
+                    if self.heartbeat_interval_s is not None:
+                        tg.create_task(self._heartbeat_loop())
                 while not self._stop.is_set():
                     try:
                         rows = await self.engine.claim_batch(
@@ -558,6 +569,43 @@ class Worker:
                     logger.warning(
                         "extend_lease failed for job %s; retrying", job_id, exc_info=exc
                     )
+        except asyncio.CancelledError:
+            return
+
+    async def _heartbeat_loop(self) -> None:
+        """Periodically emit a structured heartbeat for this worker.
+
+        The loop fires `event="worker.heartbeat"` log records and, if a
+        callback is registered, invokes ``on_heartbeat(worker_id)``.
+        Exceptions raised by the callback are logged and otherwise
+        swallowed; the loop keeps running until the worker stops.
+        """
+
+        interval = self.heartbeat_interval_s
+        assert interval is not None
+        try:
+            while True:
+                try:
+                    await asyncio.wait_for(self._stop.wait(), timeout=interval)
+                    return
+                except asyncio.TimeoutError:
+                    logger.info(
+                        "worker heartbeat",
+                        extra={
+                            "event": "worker.heartbeat",
+                            "worker_id": str(self.worker_id),
+                            "interval_s": interval,
+                        },
+                    )
+                    if self.on_heartbeat is not None:
+                        try:
+                            await self.on_heartbeat(self.worker_id)
+                        except Exception as exc:  # pragma: no cover - defensive
+                            logger.warning(
+                                "on_heartbeat callback raised: %s",
+                                exc,
+                                exc_info=True,
+                            )
         except asyncio.CancelledError:
             return
 

@@ -1,4 +1,13 @@
 
+## Unreleased
+
+* **Worker heartbeat loop** (closes #59)
+  `Worker(heartbeat_interval_s=..., on_heartbeat=async_fn)` runs a
+  background loop that emits structured `worker.heartbeat` log events
+  on a configurable cadence and invokes an optional async callback
+  with the worker's UUID, so applications can record worker liveness
+  into their own store (Redis, Postgres heartbeats table, etc.).
+
 ## 1.0.0 - API freeze
 
 This is the first stable release of Pyjobkit. The public surface
