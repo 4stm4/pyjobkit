@@ -50,8 +50,21 @@ def _import_fastapi():  # type: ignore[no-untyped-def]
     return fastapi, pydantic
 
 
-def make_router(engine: Engine, *, prefix: str = ""):  # type: ignore[no-untyped-def]
-    """Build a FastAPI ``APIRouter`` exposing job-management endpoints."""
+def make_router(  # type: ignore[no-untyped-def]
+    engine: Engine,
+    *,
+    prefix: str = "",
+    dependencies=None,
+):
+    """Build a FastAPI ``APIRouter`` exposing job-management endpoints.
+
+    Parameters:
+        engine: Pyjobkit Engine the router will delegate to.
+        prefix: Optional URL prefix passed to ``APIRouter``.
+        dependencies: Iterable of FastAPI ``Depends`` objects applied to
+            every endpoint in the router. Use this to wire authentication
+            / authorization (e.g. ``[Depends(verify_token)]``).
+    """
 
     fastapi, pydantic = _import_fastapi()
     APIRouter = fastapi.APIRouter
@@ -90,7 +103,10 @@ def make_router(engine: Engine, *, prefix: str = ""):  # type: ignore[no-untyped
         started_at: datetime | None = None
         finished_at: datetime | None = None
 
-    router = APIRouter(prefix=prefix)
+    router = APIRouter(
+        prefix=prefix,
+        dependencies=list(dependencies) if dependencies else None,
+    )
 
     @router.post("/jobs", response_model=EnqueueResponse, status_code=202)
     async def enqueue_job(req: EnqueueRequest = Body(...)) -> EnqueueResponse:

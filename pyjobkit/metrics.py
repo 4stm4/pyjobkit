@@ -76,3 +76,8 @@ phase_duration_seconds = Histogram(
     "Duration of executor phases instrumented via ctx.profile_phase().",
 )
 
+webhook_failures = Counter(
+    "pyjobkit_webhook_failures_total",
+    "Count of webhook deliveries that failed (per attempt, before retry).",
+)
+

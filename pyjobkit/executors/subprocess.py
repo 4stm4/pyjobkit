@@ -1,24 +1,80 @@
-"""Subprocess executor streaming stdout/stderr into the log sink."""
+"""Subprocess executor streaming stdout/stderr into the log sink.
+
+.. warning::
+
+   The executor runs commands taken directly from the job payload. If
+   ``enqueue`` is exposed to untrusted callers (for example via the REST
+   integration without authentication) attackers can run arbitrary
+   commands. Either keep the producer surface trusted, or construct the
+   executor with an ``allowed_commands`` allowlist so only specific
+   programs may be launched.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import logging
+import shlex
 import time
 from contextlib import suppress
-from typing import Any
+from typing import Any, Iterable
 from uuid import UUID
 
 from ..contracts import ExecContext, Executor
 
+logger = logging.getLogger(__name__)
+
 
 class SubprocessExecutor(Executor):
     kind = "subprocess"
+
+    def __init__(
+        self,
+        *,
+        allowed_commands: Iterable[str] | None = None,
+    ) -> None:
+        """Initialise the executor.
+
+        Parameters:
+            allowed_commands: When set, only payload commands whose
+                first token (program name, taken from ``argv[0]`` or
+                the leftmost word of a shell string) matches one of
+                these strings will be launched. Anything else raises
+                ``PermissionError``. ``None`` (the default) allows
+                anything but logs a warning at first run.
+        """
+
+        self._allowed = (
+            frozenset(allowed_commands) if allowed_commands is not None else None
+        )
+        self._warned_unrestricted = False
+
+    def _check_allowed(self, cmd: str | list[str]) -> str:
+        if isinstance(cmd, str):
+            parts = shlex.split(cmd)
+            head = parts[0] if parts else ""
+        else:
+            head = cmd[0] if cmd else ""
+        if self._allowed is None:
+            if not self._warned_unrestricted:
+                logger.warning(
+                    "SubprocessExecutor running without allowed_commands; "
+                    "do not expose enqueue to untrusted callers."
+                )
+                self._warned_unrestricted = True
+            return head
+        if head not in self._allowed:
+            raise PermissionError(
+                f"subprocess command {head!r} is not in the allowlist"
+            )
+        return head
 
     async def run(self, *, job_id: UUID, payload: dict, ctx: ExecContext) -> dict:
         cmd = payload["cmd"]
         env = payload.get("env")
         cwd = payload.get("cwd")
         shell = isinstance(cmd, str)
+        self._check_allowed(cmd)
         start = time.perf_counter()
         proc: asyncio.subprocess.Process | None = None
         pump_tasks: list[asyncio.Task[None]] = []
