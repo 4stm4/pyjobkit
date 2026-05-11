@@ -1,17 +1,23 @@
 # Pyjobkit
 
-[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](https://pypi.org/project/pyjobkit/)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://pypi.org/project/pyjobkit/)
 [![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/4stm4/99574c3e4a5b6f3890c375bde7e1f0cd/raw/coverage-summary.json)](https://github.com/4stm4/pyjobkit/actions)
 [![Python Version](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/downloads/release/python-3130/)
 
 Pyjobkit is a backend-agnostic toolkit for building reliable asynchronous job processing systems. It provides an `Engine` facade for enqueueing work, a cooperative asyncio `Worker`, a set of executor contracts, and pluggable queue backends so you can adapt the runtime to your infrastructure with minimal glue code.
 
 ## Features
-- **Backend abstraction** – Use the production-ready SQL backend (`pyjobkit.backends.sql.SQLBackend`) or the lightweight in-memory backend for tests and demos. Both implement the same `QueueBackend` protocol exposed in `pyjobkit.contracts`.
-- **Async worker loop** – `pyjobkit.worker.Worker` is built on `asyncio.TaskGroup`, supports concurrency limits, batch polling, lease extension, and jittered polling to minimize thundering herds.
-- **Composable executors** – Executors implement a simple `run(job_id, payload, ctx)` coroutine. The package ships with an HTTP executor for calling webhooks and a subprocess executor for shell jobs, and you can add your own by conforming to the `Executor` protocol.
-- **Observability hooks** – A memory log sink and an in-process event bus are included so executors can emit structured logs and progress updates without depending on a specific logging stack.
-- **CLI worker** – The `pyjobkit` console script wires together the SQL backend with built-in executors and exposes flags for DSN, concurrency, lease TTL, polling interval, and Postgres `SKIP LOCKED` tuning.
+- **Backends** – SQL (`SQLBackend`, Postgres / MySQL / SQLite via SQLAlchemy) for production, `MemoryBackend` for tests, optional `RedisBackend` (preview). All implement the same `QueueBackend` ABC.
+- **Async worker** – `Worker` built on `asyncio.TaskGroup` with concurrency limits, batch polling, lease extension, optimistic locking, configurable watchdog, and an optional heartbeat callback.
+- **Executors** – `SubprocessExecutor`, `HttpExecutor`, and an optional `DockerExecutor`. Custom executors implement `Executor`; third-party packages can register via the `pyjobkit.executors` entry-point group.
+- **Retry policies** – `FixedDelay` / `ExponentialBackoff` / `JitteredExponentialBackoff`, configurable per worker or per job.
+- **Scheduling** – `Engine.enqueue_at(when)` / `enqueue_in(delay)`, plus job-level `tags`, `shadow` (dry-run), and per-job `retry_policy` overrides.
+- **Routing** – `Engine.set_router(callable)` rewrites kinds based on payload; `Worker(kinds=..., tags=...)` filters claimed jobs.
+- **Rate limiting** – per-kind token bucket configured via the worker, the CLI, or TOML.
+- **Observability** – JSON log formatter (`pyjobkit.logging.JsonFormatter`), `ctx.profile_phase(...)`, Prometheus `/metrics` exporter, webhook notifications on terminal states.
+- **CLI** – `pyjobkit` (worker with `--once`, `--kind`, `--config`, `--log-format`, etc.) and `pyjobkit-simulate` (run a JSON job file against the in-memory backend).
+- **REST + dashboard** – optional FastAPI router (`pyjobkit.integrations.fastapi.make_router`) plus a bundled HTML dashboard and a TypeScript client (`ts/`).
+- **Typed API** – `py.typed` marker, public `TypedDict`s (`JobRecord`, `JobResult`, `FailureReason`), `JobStatus` / `LogStream` literals.
 
 
 ## Installation
@@ -19,12 +25,16 @@ Pyjobkit is a backend-agnostic toolkit for building reliable asynchronous job pr
 pip install pyjobkit
 ```
 
-Optional extras for async database drivers (install manually):
+Optional extras:
 
 ```bash
-pip install asyncpg      # for PostgreSQL
-pip install aiomysql     # for MySQL
-pip install aiosqlite    # for SQLite
+pip install "pyjobkit[pg]"        # asyncpg (PostgreSQL)
+pip install "pyjobkit[mysql]"     # aiomysql
+pip install "pyjobkit[sqlite]"    # aiosqlite
+pip install "pyjobkit[redis]"     # RedisBackend (preview)
+pip install "pyjobkit[docker]"    # DockerExecutor
+pip install "pyjobkit[fastapi]"   # REST router + dashboard
+pip install "pyjobkit[metrics]"   # Prometheus /metrics exporter
 ```
 
 ## Getting started
@@ -215,7 +225,7 @@ Below is a proven scenario for running the `examples/taskboard` demo stack on a 
 3. Copy the contents of your updated `docker-compose.yml` (from this repository) into the editor. Make sure only the `taskboard` service is present in the YAML.
 4. Click **Deploy the stack**. Portainer will pull the official `python:3.13-slim` image, install dependencies, clone the repository, and start the FastAPI app.
 
-> 💡 All jobs and data are stored in memory. Restarting the container will reset the job history. For production, consider building and publishing your own image to a registry.
+> All jobs and data are stored in memory. Restarting the container will reset the job history. For production, consider building and publishing your own image to a registry.
 
 #### Local run (alternative)
 
