@@ -14,6 +14,7 @@ pg = ["asyncpg"]
 mysql = ["aiomysql"]
 sqlite = ["aiosqlite"]
 metrics = ["prometheus_client>=0.20"]
+docker = ["aiodocker>=0.21"]
 
 [project.scripts]
 pyjobkit = "pyjobkit.cli:main"

@@ -1,6 +1,14 @@
 
 ## Unreleased
 
+* **DockerExecutor** (closes #49)
+  New `pyjobkit.executors.docker.DockerExecutor` runs one-shot Docker
+  containers per job using the optional `aiodocker` package. Payload
+  shape: `{image, command, env, timeout_s, pull}`; non-zero exit codes
+  raise `DockerExecutionError`. Install as `pyjobkit[docker]`. The
+  module is lazy-imported so the rest of the package keeps working
+  without aiodocker installed.
+
 * **Batch executor API** (closes #63)
   New `pyjobkit.batch` module ships `BatchExecutor` (abstract `run_batch`
   taking a list of `BatchJob`) plus a `dispatch_batch(engine, executor,

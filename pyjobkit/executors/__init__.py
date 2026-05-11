@@ -10,3 +10,14 @@ __all__ = [
     "discover_executors",
     "EXECUTOR_ENTRY_POINT_GROUP",
 ]
+
+
+def __getattr__(name: str):  # type: ignore[no-untyped-def]
+    """Lazy-import the optional DockerExecutor so missing aiodocker
+    does not break the rest of the package."""
+
+    if name == "DockerExecutor":
+        from .docker import DockerExecutor as _DockerExecutor
+
+        return _DockerExecutor
+    raise AttributeError(name)
