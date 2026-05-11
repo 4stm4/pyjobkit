@@ -4,14 +4,22 @@ The module exposes Prometheus-compatible counters and histograms when the
 ``prometheus_client`` dependency is available. When it is not installed the
 objects gracefully degrade to no-op stubs so callers can instrument codepaths
 without taking a hard dependency.
+
+A small helper :func:`start_metrics_server` boots a background HTTP server
+that exposes the Prometheus text format at ``/metrics`` (issue #44).
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 try:  # pragma: no cover - exercised only when prometheus_client is installed
-    from prometheus_client import Counter, Histogram
+    from prometheus_client import Counter, Histogram, start_http_server
+
+    _PROMETHEUS_AVAILABLE = True
 except Exception:  # pragma: no cover - defensive import guard
 
     class _NoOpMetric:
@@ -25,6 +33,26 @@ except Exception:  # pragma: no cover - defensive import guard
             return None
 
     Counter = Histogram = _NoOpMetric  # type: ignore[misc]
+    start_http_server = None  # type: ignore[assignment]
+    _PROMETHEUS_AVAILABLE = False
+
+
+def start_metrics_server(port: int = 9000, host: str = "0.0.0.0") -> bool:
+    """Start a Prometheus exporter HTTP server in the background.
+
+    Returns ``True`` when the server was started, ``False`` when the
+    ``prometheus_client`` package is not installed. The server runs in a
+    daemon thread and shuts down with the process.
+    """
+
+    if not _PROMETHEUS_AVAILABLE:
+        logger.warning(
+            "prometheus_client not installed; cannot start /metrics server"
+        )
+        return False
+    start_http_server(port, addr=host)
+    logger.info("Prometheus /metrics server listening on %s:%d", host, port)
+    return True
 
 
 extend_lease_conflicts = Counter(

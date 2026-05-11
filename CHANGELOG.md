@@ -1,6 +1,13 @@
 
 ## Unreleased
 
+* **Prometheus `/metrics` server** (closes #44)
+  New `pyjobkit.metrics.start_metrics_server(port, host)` helper boots
+  the `prometheus_client` HTTP exporter in a daemon thread; the worker
+  CLI accepts `--metrics-port` / `--metrics-host`. Added a
+  `pyjobkit[metrics]` install extra that pulls in `prometheus_client`.
+  Without the extra the helper logs a warning and returns False.
+
 * **Worker heartbeat loop** (closes #59)
   `Worker(heartbeat_interval_s=..., on_heartbeat=async_fn)` runs a
   background loop that emits structured `worker.heartbeat` log events

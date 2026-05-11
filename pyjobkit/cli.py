@@ -18,6 +18,7 @@ from .config import Config, ConfigError, LOG_FORMATS, LOG_LEVELS, load_config
 from .engine import Engine
 from .executors import HttpExecutor, SubprocessExecutor
 from .logging import configure_logging
+from .metrics import start_metrics_server
 from .worker import Worker
 
 
@@ -134,6 +135,8 @@ async def _run_worker(args: argparse.Namespace) -> None:
         )
 
     _configure_logging(config.log_level, fmt=config.log_format)
+    if args.metrics_port:
+        start_metrics_server(args.metrics_port, host=args.metrics_host)
     worker: Worker | None = None
     stopped = False
     try:
@@ -235,6 +238,20 @@ def main() -> None:
         "--enable-plugins",
         action="store_true",
         help="Discover and register executors from 'pyjobkit.executors' entry points",
+    )
+    parser.add_argument(
+        "--metrics-port",
+        type=int,
+        default=None,
+        help=(
+            "Expose Prometheus /metrics on this port. Requires the "
+            "'prometheus_client' package to be installed."
+        ),
+    )
+    parser.add_argument(
+        "--metrics-host",
+        default="0.0.0.0",
+        help="Bind address for the Prometheus /metrics server (default: 0.0.0.0)",
     )
     parser.add_argument(
         "--once",

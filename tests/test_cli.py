@@ -126,6 +126,8 @@ def test_run_worker_builds_components(monkeypatch) -> None:
             rate_limit=None,
             once=False,
             kind=None,
+            metrics_port=None,
+            metrics_host="0.0.0.0",
         )
         await cli._run_worker(args)
         assert created["dsn"] == "sqlite://"
@@ -301,6 +303,8 @@ def test_run_worker_requests_stop_on_cancel(monkeypatch) -> None:
             rate_limit=None,
             once=False,
             kind=None,
+            metrics_port=None,
+            metrics_host="0.0.0.0",
         )
         with pytest.raises(asyncio.CancelledError):
             await cli._run_worker(args)
