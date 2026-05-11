@@ -29,6 +29,8 @@ jobs:
           pip install pytest pytest-cov
       - name: Run tests with coverage
         run: pytest --cov=pyjobkit --cov-report=xml --cov-report=term
+      - name: Smoke-test integration example
+        run: python examples/ci_integration.py
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
         with:

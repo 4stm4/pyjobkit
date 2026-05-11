@@ -1,6 +1,13 @@
 
 ## Unreleased
 
+* **CI integration example** (closes #70)
+  Added `.github/workflows/example-integration.yml` plus
+  `examples/ci_integration.py` - a self-contained script that exercises
+  the full enqueue / claim / retry / shadow path against the in-memory
+  backend. The main pipeline now also runs this script as a smoke test
+  on every push.
+
 * **Closes #54** - duplicate of #53 ("Поддержка тегов и фильтрации");
   the tagging implementation in #53 covers both issues.
 
