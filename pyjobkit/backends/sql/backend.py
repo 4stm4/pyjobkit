@@ -338,6 +338,37 @@ class SQLBackend(QueueBackend):
         async with self.engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
 
+    async def purge_finished(
+        self,
+        *,
+        older_than: timedelta | None = None,
+        statuses: tuple[str, ...] = ("success", "failed", "timeout", "cancelled"),
+    ) -> int:
+        """Delete terminal jobs older than ``older_than`` and return the count.
+
+        ``older_than`` is matched against ``finished_at`` (falling back
+        to ``created_at`` when a job has no recorded finish). When
+        ``older_than`` is ``None`` every job whose ``status`` is in
+        ``statuses`` is removed.
+        """
+
+        from sqlalchemy import delete, or_
+
+        async with self.sessionmaker() as session:
+            stmt = delete(JobTasks).where(JobTasks.c.status.in_(statuses))
+            if older_than is not None:
+                cutoff = datetime.now(UTC) - older_than
+                stmt = stmt.where(
+                    or_(
+                        JobTasks.c.finished_at <= cutoff,
+                        (JobTasks.c.finished_at.is_(None))
+                        & (JobTasks.c.created_at <= cutoff),
+                    )
+                )
+            result = await session.execute(stmt)
+            await session.commit()
+            return int(result.rowcount or 0)
+
     async def _finish(
         self, job_id: UUID, status: str, result: dict, *, expected_version: int | None
     ) -> None:

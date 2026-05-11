@@ -488,6 +488,27 @@ class Engine:
             f"enqueue_timeout_s={self.enqueue_timeout_s}, executors={executors_repr})"
         )
 
+    async def purge_finished(
+        self,
+        *,
+        older_than: timedelta | None = None,
+        statuses: tuple[str, ...] = ("success", "failed", "timeout", "cancelled"),
+    ) -> int:
+        """Delete terminal jobs older than ``older_than`` via the backend.
+
+        Returns the number of jobs removed. Raises ``NotImplementedError``
+        when the backend does not provide ``purge_finished`` (custom
+        :class:`QueueBackend` implementations may add it duck-typed).
+        """
+
+        purge = getattr(self.backend, "purge_finished", None)
+        if purge is None:
+            raise NotImplementedError(
+                f"backend {type(self.backend).__name__} does not implement "
+                "purge_finished()"
+            )
+        return await purge(older_than=older_than, statuses=statuses)
+
     async def close(self) -> None:
         """Release held resources for backend, log sink, or event bus when supported."""
 

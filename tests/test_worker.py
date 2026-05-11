@@ -314,24 +314,35 @@ def test_worker_kills_subprocess_on_timeout(tmp_path) -> None:
                         "python3",
                         "-c",
                         (
-                            "import os, time, pathlib; "
+                            "import os, sys, time, pathlib; "
                             f"pathlib.Path('{pid_file}').write_text(str(os.getpid())); "
-                            "time.sleep(10)"
+                            "sys.stdout.flush(); "
+                            "time.sleep(30)"
                         ),
                     ]
                 },
-                    # Allow enough time for the child process to start and write the PID
-                    # file before the worker times out the job.
-                    "timeout_s": 0.2,
-                }
-            )
+                # Give the child generous startup headroom; the worker
+                # still kills it shortly after, since the sleep is 30s.
+                "timeout_s": 2,
+            }
+        )
 
+        # Wait briefly for the worker's SIGTERM/SIGKILL pipeline to land.
+        for _ in range(20):
+            if pid_file.exists():
+                break
+            await asyncio.sleep(0.05)
         if not pid_file.exists():
             pytest.fail("child pid file not created")
 
         pid = int(pid_file.read_text())
-        with pytest.raises(ProcessLookupError):
-            os.kill(pid, 0)
+        for _ in range(40):  # up to ~2s
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return
+            await asyncio.sleep(0.05)
+        pytest.fail(f"child pid {pid} still alive after worker timeout")
 
     asyncio.run(_run())
 

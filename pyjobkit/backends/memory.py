@@ -238,6 +238,34 @@ class MemoryBackend(QueueBackend):
         async with self._lock:
             self._jobs.clear()
 
+    async def purge_finished(
+        self,
+        *,
+        older_than: timedelta | None = None,
+        statuses: tuple[str, ...] = ("success", "failed", "timeout", "cancelled"),
+    ) -> int:
+        """Delete terminal jobs older than ``older_than`` and return the count.
+
+        ``older_than`` is matched against ``finished_at`` (falling back
+        to ``created_at`` if a job has no recorded finish). When
+        ``older_than`` is ``None`` every job whose status matches
+        ``statuses`` is purged.
+        """
+
+        async with self._lock:
+            cutoff = datetime.now(UTC) - older_than if older_than else None
+            to_delete = []
+            for jid, job in self._jobs.items():
+                if job.status not in statuses:
+                    continue
+                ref = job.finished_at or job.created_at
+                if cutoff is not None and ref > cutoff:
+                    continue
+                to_delete.append(jid)
+            for jid in to_delete:
+                del self._jobs[jid]
+            return len(to_delete)
+
     async def _finish(
         self,
         job_id: UUID,

@@ -21,6 +21,8 @@ redis = ["redis>=5.0"]
 [project.scripts]
 pyjobkit = "pyjobkit.cli:main"
 pyjobkit-simulate = "pyjobkit.cli_simulate:main"
+pyjobkit-migrate = "pyjobkit.cli_migrate:main"
+pyjobkit-prune = "pyjobkit.cli_prune:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -30,4 +32,9 @@ build-backend = "setuptools.build_meta"
 include = ["pyjobkit*"]
 
 [tool.setuptools.package-data]
-pyjobkit = ["py.typed"]
+pyjobkit = [
+    "py.typed",
+    "backends/sql/alembic.ini",
+    "backends/sql/migrations/env.py",
+    "backends/sql/migrations/versions/*.py",
+]

@@ -188,10 +188,16 @@ def test_subprocess_executor_cancels_process(tmp_path) -> None:
             await task
 
         pid = int(pid_file.read_text())
-        # Allow a brief moment for the process to receive the signal.
-        await asyncio.sleep(0.05)
-        with pytest.raises(ProcessLookupError):
-            os.kill(pid, 0)
+        # Wait for the process to receive the signal; CI machines can
+        # be slow to deliver SIGTERM, so poll instead of a fixed sleep.
+        for _ in range(40):  # up to ~2s
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            pytest.fail(f"child pid {pid} still alive after cancellation")
 
         assert any("terminating process" in message for _, message in ctx.logs)
         pump_tasks = [t for t in asyncio.all_tasks() if t.get_coro().__name__ == "_pump"]
@@ -235,9 +241,14 @@ def test_subprocess_executor_times_out_and_kills(tmp_path) -> None:
             pytest.fail("child pid file not created")
 
         pid = int(pid_file.read_text())
-        await asyncio.sleep(0.05)
-        with pytest.raises(ProcessLookupError):
-            os.kill(pid, 0)
+        for _ in range(40):  # up to ~2s
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            pytest.fail(f"child pid {pid} still alive after timeout")
 
         assert any("terminating process" in message for _, message in ctx.logs)
         pump_tasks = [t for t in asyncio.all_tasks() if t.get_coro().__name__ == "_pump"]
