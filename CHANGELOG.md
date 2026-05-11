@@ -1,6 +1,14 @@
 
 ## Unreleased
 
+* **Batch executor API** (closes #63)
+  New `pyjobkit.batch` module ships `BatchExecutor` (abstract `run_batch`
+  taking a list of `BatchJob`) plus a `dispatch_batch(engine, executor,
+  rows, worker_id)` helper that handles `mark_running` for each row and
+  per-job `succeed` / `fail` with the right `expected_version`. Allows
+  callers to amortise expensive operations across many similar jobs
+  without subclassing `Worker`.
+
 * **Leader election primitives** (closes #61)
   New `pyjobkit.leader` module exposes a `LeaderLock` ABC, an
   in-process `MemoryLeaderLock` reference implementation that shares
