@@ -1,6 +1,14 @@
 
 ## Unreleased
 
+* **Redis backend (preview)** (closes #50)
+  New `pyjobkit.backends.redis.RedisBackend` implements `QueueBackend`
+  using a Redis ZSET ready queue, per-job hashes, and a leased ZSET
+  for in-flight tracking. Atomic claim / reap operations use small Lua
+  scripts. Install via `pyjobkit[redis]`. The implementation is
+  flagged **preview** while we collect feedback on the schema; the
+  module is lazy-imported so `redis` remains optional.
+
 * **FastAPI integration + REST API** (closes #58, #64)
   New `pyjobkit.integrations.fastapi.make_router(engine)` returns an
   `APIRouter` exposing `POST /jobs`, `GET /jobs/{id}`,
