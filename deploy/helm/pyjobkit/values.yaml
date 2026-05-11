@@ -1,0 +1,66 @@
+# Default values for the Pyjobkit Helm chart.
+
+image:
+  repository: ghcr.io/4stm4/pyjobkit
+  tag: ""              # defaults to chart.appVersion
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+# DSN is required. Either set 'dsn' inline (template renders it into a
+# Secret) or set existingSecret/dsnKey to reuse a Secret you manage.
+dsn: ""                # e.g. postgresql+asyncpg://user:pass@host/db
+existingSecret: ""
+dsnKey: PYJOBKIT_DSN
+
+# Tunables forwarded to PYJOBKIT_* env vars on the worker.
+config:
+  concurrency: 16
+  batch: 4
+  leaseTtl: 30
+  pollInterval: 0.5
+  logFormat: json
+  logLevel: INFO
+  retryPolicy: "exponential_jitter:1:2:60:0.1"
+  watchdogIntervalS: 30
+  enablePlugins: false
+  metricsPort: 9000
+  rateLimits: ""       # e.g. "http:5:10,email:2"
+
+# Optional HMAC secret for webhooks.
+webhookSecret: ""
+webhookSecretExistingSecret: ""
+webhookSecretKey: PYJOBKIT_WEBHOOK_SECRET
+
+# Run schema migrations as a one-shot Job before the workers start.
+migrate:
+  enabled: true
+  image:
+    repository: ghcr.io/4stm4/pyjobkit
+    tag: ""
+  backoffLimit: 3
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+podAnnotations: {}
+podSecurityContext: {}
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+
+service:
+  enabled: true        # expose metricsPort via a ClusterIP service
+  type: ClusterIP
+  port: 9000
+
+# Pod-level lifecycle hooks: TERM signal initiates graceful drain.
+terminationGracePeriodSeconds: 90
+
+# Optional Prometheus ServiceMonitor (requires kube-prometheus-stack).
+serviceMonitor:
+  enabled: false
+  labels: {}
+  interval: 30s

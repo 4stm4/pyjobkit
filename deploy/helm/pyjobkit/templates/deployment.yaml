@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "pyjobkit.fullname" . }}
+  labels: {{- include "pyjobkit.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels: {{- include "pyjobkit.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "pyjobkit.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.podSecurityContext }}
+      securityContext: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: worker
+          image: {{ include "pyjobkit.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          args:
+            - --concurrency
+            - "{{ .Values.config.concurrency }}"
+            - --batch
+            - "{{ .Values.config.batch }}"
+            - --lease-ttl
+            - "{{ .Values.config.leaseTtl }}"
+            - --poll-interval
+            - "{{ .Values.config.pollInterval }}"
+            - --log-format
+            - "{{ .Values.config.logFormat }}"
+            - --log-level
+            - "{{ .Values.config.logLevel }}"
+            - --retry-policy
+            - "{{ .Values.config.retryPolicy }}"
+            - --watchdog-interval
+            - "{{ .Values.config.watchdogIntervalS }}"
+            {{- if .Values.config.metricsPort }}
+            - --metrics-port
+            - "{{ .Values.config.metricsPort }}"
+            {{- end }}
+            {{- if .Values.config.enablePlugins }}
+            - --enable-plugins
+            {{- end }}
+            {{- if .Values.config.rateLimits }}
+            {{- range (splitList "," .Values.config.rateLimits) }}
+            - --rate-limit
+            - "{{ . }}"
+            {{- end }}
+            {{- end }}
+          env:
+            - name: {{ .Values.dsnKey }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "pyjobkit.dsnSecret" . }}
+                  key: {{ .Values.dsnKey }}
+            {{- if or .Values.webhookSecret .Values.webhookSecretExistingSecret }}
+            - name: {{ .Values.webhookSecretKey }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (printf "%s-webhook" (include "pyjobkit.fullname" .)) .Values.webhookSecretExistingSecret }}
+                  key: {{ .Values.webhookSecretKey }}
+            {{- end }}
+          ports:
+            {{- if .Values.config.metricsPort }}
+            - name: metrics
+              containerPort: {{ .Values.config.metricsPort }}
+              protocol: TCP
+            {{- end }}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}

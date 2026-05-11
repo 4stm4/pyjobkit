@@ -1,0 +1,28 @@
+{{- if .Values.migrate.enabled -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "pyjobkit.fullname" . }}-migrate
+  labels: {{- include "pyjobkit.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrate.backoffLimit }}
+  template:
+    metadata:
+      labels: {{- include "pyjobkit.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: "{{ .Values.migrate.image.repository }}:{{ .Values.migrate.image.tag | default .Chart.AppVersion }}"
+          command: ["pyjobkit-migrate"]
+          args: ["up"]
+          env:
+            - name: PYJOBKIT_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "pyjobkit.dsnSecret" . }}
+                  key: {{ .Values.dsnKey }}
+{{- end -}}

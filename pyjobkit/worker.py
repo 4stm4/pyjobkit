@@ -20,7 +20,12 @@ from uuid import UUID, uuid4
 from typing import Awaitable, Callable
 
 from .contracts import OptimisticLockError
-from .engine import Engine, SHADOW_PAYLOAD_KEY, TAGS_PAYLOAD_KEY
+from .engine import (
+    CHAIN_PAYLOAD_KEY,
+    Engine,
+    SHADOW_PAYLOAD_KEY,
+    TAGS_PAYLOAD_KEY,
+)
 from .tracing import (
     TRACE_CONTEXT_PAYLOAD_KEY,
     restore_trace_context,
@@ -257,6 +262,32 @@ class Worker:
             self._sem.release()
             self._decrement_active()
 
+    async def _enqueue_chain_tail(
+        self,
+        rest: list[dict[str, Any]],
+        *,
+        previous_job_id: UUID,
+        previous_result: Any,
+    ) -> None:
+        if not rest:
+            return
+        next_step = dict(rest[0])
+        next_payload = dict(next_step.get("payload") or {})
+        next_payload["previous_result"] = previous_result
+        next_payload["previous_job_id"] = str(previous_job_id)
+        if len(rest) > 1:
+            next_payload[CHAIN_PAYLOAD_KEY] = rest[1:]
+        next_step["payload"] = next_payload
+        try:
+            await self.engine.enqueue(**next_step)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "failed to enqueue chain tail for job %s: %s",
+                previous_job_id,
+                exc,
+                exc_info=True,
+            )
+
     @staticmethod
     def _age_seconds(row: dict[str, Any]) -> float | None:
         created = row.get("created_at")
@@ -363,6 +394,7 @@ class Worker:
                     per_job_policy_spec,
                     job_id,
                 )
+        chain_rest = raw_payload.get(CHAIN_PAYLOAD_KEY) or []
         payload = {
             k: v
             for k, v in raw_payload.items()
@@ -372,6 +404,7 @@ class Worker:
                 WEBHOOK_PAYLOAD_KEY,
                 TAGS_PAYLOAD_KEY,
                 TRACE_CONTEXT_PAYLOAD_KEY,
+                CHAIN_PAYLOAD_KEY,
             )
         }
         ctx = self.engine.make_ctx(job_id, is_shadow=is_shadow)
@@ -471,6 +504,10 @@ class Worker:
                     started_at=started_at,
                     result=result,
                 )
+                if chain_rest:
+                    await self._enqueue_chain_tail(
+                        chain_rest, previous_job_id=job_id, previous_result=result
+                    )
         except asyncio.TimeoutError:
             exec_task.cancel()
             with suppress(asyncio.CancelledError):

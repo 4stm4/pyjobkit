@@ -1,6 +1,22 @@
 
 ## Unreleased
 
+* **Roadmap: bulk insert, OpenTelemetry, scheduler, chains, deploy
+  assets.** `SQLBackend.enqueue_many` performs a single
+  `INSERT ... VALUES (...)` per batch; `Engine.enqueue_many` falls
+  back to per-row only when payload markers (shadow / tags / webhooks
+  / retry_policy) are present. New `pyjobkit.tracing` module wraps
+  `Engine.enqueue` and `Worker._execute_row` in OpenTelemetry spans
+  when `opentelemetry-api` is installed and propagates the W3C trace
+  context via a payload marker. New `pyjobkit.scheduler.Scheduler`
+  enqueues entries on a fixed interval and composes with
+  `pyjobkit.leader.MemoryLeaderLock`. `Engine.chain(*steps)` runs
+  jobs sequentially, threading the previous result through
+  `payload["previous_result"]`; failure aborts the chain. New
+  `deploy/helm/pyjobkit` Helm chart, `deploy/grafana/...json` Grafana
+  dashboard, and `deploy/README.md` explain how to install the
+  worker on Kubernetes.
+
 * **Production hardening (round A)** - SIGTERM/SIGINT handlers in the
   worker CLI for graceful shutdown, `async with` support on `Engine`
   and `Worker`, single-shot guard on `Worker.run` (raises on reuse),

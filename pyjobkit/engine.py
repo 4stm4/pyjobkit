@@ -34,6 +34,16 @@ SHADOW_PAYLOAD_KEY = "__pjk_shadow"
 TAGS_PAYLOAD_KEY = "__pjk_tags"
 """Payload key carrying a list of tags assigned to the job."""
 
+CHAIN_PAYLOAD_KEY = "__pjk_chain"
+"""Payload key carrying the remaining specs of a job chain.
+
+Each entry is a kwargs mapping accepted by :meth:`Engine.enqueue`. When
+the worker successfully finishes a chained job it pops the next entry
+off the list (merging the just-finished result into ``previous_result``
+on its payload) and enqueues it. Failure / timeout / cancellation skip
+the rest of the chain.
+"""
+
 logger = logging.getLogger(__name__)
 
 
@@ -222,6 +232,29 @@ class Engine:
                 priority,
             )
         return job_id
+
+    async def chain(self, *steps: dict[str, Any]) -> UUID:
+        """Enqueue a chain of jobs that run sequentially.
+
+        ``steps`` is one kwargs mapping per job (same shape as
+        :meth:`enqueue`). Only the first job is enqueued immediately;
+        the rest ride along inside its payload via the
+        ``__pjk_chain`` marker. On successful completion the worker
+        enqueues the next step, threading the previous result through
+        as ``payload["previous_result"]``. A failed / timed-out /
+        cancelled step aborts the remaining chain.
+
+        Returns the id of the first job.
+        """
+
+        if not steps:
+            raise ValueError("chain requires at least one step")
+        head, *rest = (dict(step) for step in steps)
+        head_payload = dict(head.get("payload") or {})
+        if rest:
+            head_payload[CHAIN_PAYLOAD_KEY] = rest
+        head["payload"] = head_payload
+        return await self.enqueue(**head)
 
     async def enqueue_many(self, jobs: Iterable[dict[str, Any]]) -> list[UUID]:
         """Enqueue a batch of jobs and return their ids in the same order.

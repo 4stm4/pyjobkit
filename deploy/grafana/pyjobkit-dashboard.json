@@ -1,0 +1,108 @@
+{
+  "title": "Pyjobkit",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": ["pyjobkit"],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": {"from": "now-1h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "instance",
+        "type": "query",
+        "datasource": "Prometheus",
+        "refresh": 2,
+        "query": "label_values(pyjobkit_extend_lease_latency_seconds_sum, instance)",
+        "includeAll": true,
+        "multi": true
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Lease conflicts (5m)",
+      "datasource": "Prometheus",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "sum(rate(pyjobkit_extend_lease_conflicts_total{instance=~\"$instance\"}[5m]))"
+        }
+      ],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Webhook failures (5m)",
+      "datasource": "Prometheus",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "targets": [
+        {
+          "expr": "sum(rate(pyjobkit_webhook_failures_total{instance=~\"$instance\"}[5m]))"
+        }
+      ],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Lease extension latency (p50 / p95 / p99)",
+      "datasource": "Prometheus",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum(rate(pyjobkit_extend_lease_latency_seconds_bucket{instance=~\"$instance\"}[5m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(pyjobkit_extend_lease_latency_seconds_bucket{instance=~\"$instance\"}[5m])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(pyjobkit_extend_lease_latency_seconds_bucket{instance=~\"$instance\"}[5m])) by (le))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Phase duration (p50 / p95)",
+      "datasource": "Prometheus",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum(rate(pyjobkit_phase_duration_seconds_bucket{instance=~\"$instance\"}[5m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(pyjobkit_phase_duration_seconds_bucket{instance=~\"$instance\"}[5m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Observed lease TTL distribution",
+      "datasource": "Prometheus",
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 12},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum(rate(pyjobkit_lease_ttl_seconds_bucket{instance=~\"$instance\"}[5m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(pyjobkit_lease_ttl_seconds_bucket{instance=~\"$instance\"}[5m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    }
+  ]
+}
