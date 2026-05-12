@@ -91,9 +91,22 @@ class MemoryBackend(QueueBackend):
     async def enqueue_many(self, jobs) -> list[UUID]:
         """Bulk enqueue under a single lock acquisition."""
 
+        specs = list(jobs)
+        seen_keys: set[str] = set()
+        for idx, spec in enumerate(specs):
+            if "kind" not in spec or not spec["kind"]:
+                raise ValueError(f"enqueue_many[{idx}]: 'kind' is required")
+            key = spec.get("idempotency_key")
+            if key is not None:
+                if key in seen_keys:
+                    raise ValueError(
+                        f"enqueue_many: duplicate idempotency_key {key!r} in batch"
+                    )
+                seen_keys.add(key)
+
         out: list[UUID] = []
         async with self._lock:
-            for spec in jobs:
+            for spec in specs:
                 idem = spec.get("idempotency_key")
                 if idem:
                     existing = next(
@@ -258,11 +271,28 @@ class MemoryBackend(QueueBackend):
                 return len(self._jobs)
             return sum(1 for job in self._jobs.values() if job.status == status)
 
-    async def all_jobs(self) -> list[dict]:
-        """Return a snapshot of every job currently stored in the backend."""
+    async def all_jobs(
+        self,
+        *,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict]:
+        """Return a snapshot of stored jobs, optionally filtered.
+
+        ``status`` matches the job's terminal/in-flight state; ``limit``
+        caps the returned list. Both filters are applied inside the lock
+        so callers avoid materialising the full table.
+        """
 
         async with self._lock:
-            return [self._job_to_dict(job) for job in self._jobs.values()]
+            out: list[dict] = []
+            for job in self._jobs.values():
+                if status is not None and job.status != status:
+                    continue
+                out.append(self._job_to_dict(job))
+                if limit is not None and len(out) >= limit:
+                    break
+            return out
 
     async def clear(self) -> None:
         """Drop every stored job. Useful between test cases."""

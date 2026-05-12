@@ -96,6 +96,7 @@ async def leader_loop(
     renew_every_s: float | None = None,
     on_leader: Callable[[], Awaitable[None]],
     stop_event: asyncio.Event | None = None,
+    cancel_grace_s: float = 5.0,
 ) -> None:
     """Drive a coroutine while ``lock`` is held.
 
@@ -103,6 +104,11 @@ async def leader_loop(
     concurrently, and renews the lock every ``renew_every_s`` (defaults
     to ``ttl_s / 2``). If the lock is lost the ``on_leader`` coroutine
     is cancelled and the loop returns to polling for the lock.
+
+    ``cancel_grace_s`` bounds how long the loop will wait for
+    ``on_leader`` to honour the cancellation before giving up; if the
+    coroutine swallows ``CancelledError`` the loop logs a warning and
+    moves on, releasing the lock so a replacement leader can take over.
 
     Set ``stop_event`` to cooperatively exit the loop. Any exception
     raised by ``on_leader`` is logged and the loop continues.
@@ -114,6 +120,8 @@ async def leader_loop(
         renew_every_s = ttl_s / 2.0
     if renew_every_s <= 0:
         raise ValueError("renew_every_s must be > 0")
+    if cancel_grace_s <= 0:
+        raise ValueError("cancel_grace_s must be > 0")
     stop_event = stop_event or asyncio.Event()
     poll_interval = min(1.0, ttl_s / 3.0)
 
@@ -147,7 +155,13 @@ async def leader_loop(
         finally:
             leader_task.cancel()
             try:
-                await leader_task
+                await asyncio.wait_for(leader_task, timeout=cancel_grace_s)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "leader: on_leader did not honour cancellation within %.1fs; "
+                    "releasing the lock anyway",
+                    cancel_grace_s,
+                )
             except (asyncio.CancelledError, Exception):
                 pass
             await lock.release()

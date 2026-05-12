@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 
+from . import metrics
 from .engine import Engine
 from .leader import LeaderLock
 
@@ -67,9 +68,17 @@ class Scheduler:
         scheduler.every(timedelta(hours=1), name="prune", kind="cleanup", payload={})
         await scheduler.run(stop_event=stop)
 
-    Pair with :func:`pyjobkit.leader.leader_loop` (or an external lock)
-    so only the leader enqueues when multiple workers run the
-    scheduler.
+    Each registered entry uses an :ref:`idempotency_key` of the form
+    ``scheduler:<name>:<slot>`` where ``<slot>`` is the integer time
+    bucket of the current interval. That makes duplicate enqueues a
+    no-op at the backend level - safe under leader churn (HA) since
+    two schedulers racing on the same slot collapse to a single row
+    via the backend's UNIQUE constraint on ``idempotency_key``.
+
+    Enqueue failures are counted in
+    ``pyjobkit_scheduler_enqueue_failures_total`` and logged at
+    WARNING. The entry's ``next_run`` is **not** advanced on failure
+    so the next tick re-attempts the same slot.
     """
 
     def __init__(self, engine: Engine, *, clock: Callable[[], float] | None = None) -> None:
@@ -116,19 +125,30 @@ class Scheduler:
         for entry in list(self._entries.values()):
             if entry.next_run > now:
                 continue
+            # Time-bucket the idempotency key so racing schedulers (e.g.
+            # during a leader handover) cannot enqueue the same slot twice.
+            slot = int(entry.next_run // entry.interval.total_seconds())
+            kwargs = dict(entry.enqueue_kwargs)
+            kwargs.setdefault("idempotency_key", f"scheduler:{entry.name}:{slot}")
             try:
                 await self.engine.enqueue(
                     kind=entry.kind,
                     payload=entry.payload,
-                    **entry.enqueue_kwargs,
+                    **kwargs,
                 )
                 enqueued += 1
-            except Exception as exc:  # pragma: no cover - defensive
+                entry.last_run = now
+                entry.next_run = now + entry.interval.total_seconds()
+            except Exception as exc:
+                metrics.scheduler_enqueue_failures_total.inc()
                 logger.warning(
-                    "scheduler entry %r failed to enqueue: %s", entry.name, exc
+                    "scheduler entry %r failed to enqueue (will retry next tick): %s",
+                    entry.name,
+                    exc,
+                    exc_info=True,
                 )
-            entry.last_run = now
-            entry.next_run = now + entry.interval.total_seconds()
+                # Do NOT advance next_run on failure so the next tick
+                # re-attempts the same slot.
         return enqueued
 
     async def run(

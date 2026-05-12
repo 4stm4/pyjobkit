@@ -86,3 +86,8 @@ chain_broken_total = Counter(
     "Count of chains whose tail could not be enqueued after the head finished.",
 )
 
+scheduler_enqueue_failures_total = Counter(
+    "pyjobkit_scheduler_enqueue_failures_total",
+    "Count of scheduler ticks that failed to enqueue an entry.",
+)
+

@@ -77,16 +77,36 @@ class SQLBackend(QueueBackend):
     async def enqueue_many(self, jobs: Iterable[dict]) -> list[UUID]:
         """Insert several jobs in a single round trip.
 
-        Each entry is a kwargs mapping accepted by :meth:`enqueue`. The
-        method generates the ids server-side (UUID4) and persists them
-        through a single ``INSERT ... VALUES (...), (...), ...`` so
-        producers that batch their work avoid per-row latency.
+        Each entry is a kwargs mapping accepted by :meth:`enqueue`.
+        Every spec is validated up front (presence of ``kind``,
+        no duplicate ``idempotency_key`` within the batch) so the
+        method either inserts the whole batch atomically or raises
+        before touching the database. Cross-batch idempotency
+        collisions surface as the underlying driver's
+        ``IntegrityError`` - the existing rows are not overwritten.
         """
 
-        rows = []
-        ids: list[UUID] = []
+        specs = list(jobs)
+        if not specs:
+            return []
+
+        # Validate up-front so we never half-build a row list.
+        seen_keys: set[str] = set()
+        for idx, spec in enumerate(specs):
+            if "kind" not in spec or not spec["kind"]:
+                raise ValueError(f"enqueue_many[{idx}]: 'kind' is required")
+            key = spec.get("idempotency_key")
+            if key is not None:
+                if key in seen_keys:
+                    raise ValueError(
+                        f"enqueue_many: duplicate idempotency_key {key!r} in batch"
+                    )
+                seen_keys.add(key)
+
         now = datetime.now(UTC)
-        for spec in jobs:
+        ids: list[UUID] = []
+        rows: list[dict] = []
+        for spec in specs:
             job_id = uuid4()
             ids.append(job_id)
             rows.append(
@@ -103,8 +123,6 @@ class SQLBackend(QueueBackend):
                     timeout_s=spec.get("timeout_s"),
                 )
             )
-        if not rows:
-            return []
         async with self.sessionmaker() as session:
             await session.execute(JobTasks.insert(), rows)
             await session.commit()

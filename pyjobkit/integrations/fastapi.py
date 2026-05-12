@@ -77,7 +77,10 @@ def make_router(  # type: ignore[no-untyped-def]
         kind: str
         payload: dict[str, Any] = Field(default_factory=dict)
         priority: int = 100
-        max_attempts: int = 3
+        # None defers to Engine.default_max_attempts so the REST API
+        # honors the worker's configured default just like the Python
+        # API does.
+        max_attempts: int | None = None
         scheduled_for: datetime | None = None
         timeout_s: int | None = None
         idempotency_key: str | None = None
@@ -140,10 +143,15 @@ def make_router(  # type: ignore[no-untyped-def]
                 status_code=501,
                 detail="Listing is only available on backends that implement all_jobs()",
             )
-        records = await all_jobs()
-        if status:
-            records = [r for r in records if r.get("status") == status]
-        records = records[:limit]
+        # Push the filter/limit into the backend when its signature
+        # accepts them, otherwise fall back to a Python-side slice.
+        try:
+            records = await all_jobs(status=status, limit=limit)
+        except TypeError:
+            records = await all_jobs()
+            if status:
+                records = [r for r in records if r.get("status") == status]
+            records = records[:limit]
         out: list[JobRecordResponse] = []
         for r in records:
             jid = r.get("id")
