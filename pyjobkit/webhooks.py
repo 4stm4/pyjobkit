@@ -133,30 +133,46 @@ async def fire(
     delay = initial_delay_s
     last_exc: Exception | None = None
     for attempt in range(1, max(1, max_attempts) + 1):
+        retryable = True
         try:
             if client is not None:
                 response = await _send_once(client)
             else:
                 async with httpx.AsyncClient() as ad_hoc:
                     response = await _send_once(ad_hoc)
-            response.raise_for_status()
-            return
-        except Exception as exc:
-            last_exc = exc
-            metrics.webhook_failures.inc()
-            logger.warning(
-                "webhook %s -> %s failed (attempt %d/%d) for job %s: %s",
-                key,
-                url,
-                attempt,
-                max_attempts,
-                job_id,
-                exc,
+            if response.is_success:
+                return
+            # 4xx is the producer's fault and will not change by being
+            # retried; 5xx and transport errors are worth retrying.
+            retryable = response.status_code >= 500
+            exc: Exception = httpx.HTTPStatusError(
+                f"HTTP {response.status_code}",
+                request=response.request,
+                response=response,
             )
-            if attempt >= max_attempts:
-                break
-            await asyncio.sleep(delay)
-            delay *= 2
+        except httpx.HTTPError as transport_exc:
+            # Connection refused / DNS / timeout / read error - retry.
+            exc = transport_exc
+            retryable = True
+        except Exception as other:  # pragma: no cover - defensive
+            exc = other
+            retryable = True
+
+        last_exc = exc
+        metrics.webhook_failures.inc()
+        logger.warning(
+            "webhook %s -> %s failed (attempt %d/%d) for job %s: %s",
+            key,
+            url,
+            attempt,
+            max_attempts,
+            job_id,
+            exc,
+        )
+        if not retryable or attempt >= max_attempts:
+            break
+        await asyncio.sleep(delay)
+        delay *= 2
 
     logger.warning(
         "webhook %s -> %s permanently failed for job %s: %s",

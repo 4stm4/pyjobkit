@@ -269,6 +269,17 @@ class Worker:
         previous_job_id: UUID,
         previous_result: Any,
     ) -> None:
+        """Enqueue the next step of a chain after the head completed.
+
+        Failures here are unrecoverable from the worker's perspective:
+        the head job is already marked ``success`` and the tail can no
+        longer be reached by automatic retry. We emit the structured
+        ``chain.broken`` event, bump the
+        ``pyjobkit_chain_broken_total`` counter, and re-raise neither
+        (the worker has nothing useful to do) but operators have both a
+        log entry and a metric to alert on.
+        """
+
         if not rest:
             return
         next_step = dict(rest[0])
@@ -280,10 +291,23 @@ class Worker:
         next_step["payload"] = next_payload
         try:
             await self.engine.enqueue(**next_step)
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception as exc:
+            from . import metrics
+
+            metrics.chain_broken_total.inc()
+            self._log_state(
+                "chain.broken",
+                job_id=previous_job_id,
+                status="success",  # head finished, tail did not
+                started_at=None,
+                exception_type=type(exc).__name__,
+                detail=str(exc),
+                remaining=len(rest),
+            )
             logger.warning(
-                "failed to enqueue chain tail for job %s: %s",
+                "failed to enqueue chain tail after job %s (%d step(s) lost): %s",
                 previous_job_id,
+                len(rest),
                 exc,
                 exc_info=True,
             )

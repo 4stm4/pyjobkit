@@ -22,8 +22,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "pyjobkit.dsnSecret" -}}
 {{- if .Values.existingSecret -}}
 {{ .Values.existingSecret }}
-{{- else -}}
+{{- else if .Values.dsn -}}
 {{ include "pyjobkit.fullname" . }}-dsn
+{{- else -}}
+{{- fail "pyjobkit: one of .Values.dsn or .Values.existingSecret must be set" -}}
 {{- end -}}
 {{- end -}}
 

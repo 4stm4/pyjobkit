@@ -81,3 +81,8 @@ webhook_failures = Counter(
     "Count of webhook deliveries that failed (per attempt, before retry).",
 )
 
+chain_broken_total = Counter(
+    "pyjobkit_chain_broken_total",
+    "Count of chains whose tail could not be enqueued after the head finished.",
+)
+

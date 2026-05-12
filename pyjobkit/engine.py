@@ -37,12 +37,39 @@ TAGS_PAYLOAD_KEY = "__pjk_tags"
 CHAIN_PAYLOAD_KEY = "__pjk_chain"
 """Payload key carrying the remaining specs of a job chain.
 
-Each entry is a kwargs mapping accepted by :meth:`Engine.enqueue`. When
-the worker successfully finishes a chained job it pops the next entry
-off the list (merging the just-finished result into ``previous_result``
-on its payload) and enqueues it. Failure / timeout / cancellation skip
-the rest of the chain.
+INTERNAL_PAYLOAD_KEYS lists all library-managed markers so callers that
+serialize payloads (REST responses, dashboards, audit exports) can
+strip them in one place.
 """
+
+INTERNAL_PAYLOAD_KEYS = frozenset(
+    {
+        SHADOW_PAYLOAD_KEY,
+        TAGS_PAYLOAD_KEY,
+        CHAIN_PAYLOAD_KEY,
+        "__pjk_retry_policy",
+        "__pjk_webhooks",
+        "__pjk_trace_context",
+    }
+)
+"""Frozen set of payload keys that Pyjobkit uses internally.
+
+The constants in :mod:`pyjobkit.retry`, :mod:`pyjobkit.webhooks`, and
+:mod:`pyjobkit.tracing` are duplicated here verbatim to avoid an import
+cycle - keep them in sync.
+"""
+
+
+def strip_internal_payload(payload: dict | None) -> dict:
+    """Return ``payload`` without library-managed marker keys.
+
+    Safe for ``None`` and non-dict inputs (returns ``{}`` in both cases).
+    """
+
+    if not isinstance(payload, dict):
+        return {}
+    return {k: v for k, v in payload.items() if k not in INTERNAL_PAYLOAD_KEYS}
+
 
 logger = logging.getLogger(__name__)
 
@@ -294,7 +321,7 @@ class Engine:
         kind: str,
         payload: dict,
         priority: int = 100,
-        max_attempts: int = 3,
+        max_attempts: int | None = None,
         idempotency_key: str | None = None,
         timeout_s: int | None = None,
         shadow: bool = False,
@@ -330,7 +357,7 @@ class Engine:
         kind: str,
         payload: dict,
         priority: int = 100,
-        max_attempts: int = 3,
+        max_attempts: int | None = None,
         idempotency_key: str | None = None,
         timeout_s: int | None = None,
         shadow: bool = False,

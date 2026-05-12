@@ -50,7 +50,8 @@ class SubprocessExecutor(Executor):
         self._warned_unrestricted = False
 
     def _check_allowed(self, cmd: str | list[str]) -> str:
-        if isinstance(cmd, str):
+        is_shell_string = isinstance(cmd, str)
+        if is_shell_string:
             parts = shlex.split(cmd)
             head = parts[0] if parts else ""
         else:
@@ -63,6 +64,16 @@ class SubprocessExecutor(Executor):
                 )
                 self._warned_unrestricted = True
             return head
+        # When an allowlist is configured we *must not* run shell strings:
+        # even with a permitted head like "bash" or "sh", the rest of the
+        # string is interpreted by the shell and trivially bypasses the
+        # filter (e.g. "bash -c 'rm -rf /'"). Force the producer to pass
+        # an argv list so the allowlist's first-token check is meaningful.
+        if is_shell_string:
+            raise PermissionError(
+                "subprocess command must be a list when allowed_commands is set; "
+                "shell strings bypass the allowlist"
+            )
         if head not in self._allowed:
             raise PermissionError(
                 f"subprocess command {head!r} is not in the allowlist"

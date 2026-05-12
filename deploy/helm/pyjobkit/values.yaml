@@ -59,6 +59,22 @@ service:
 # Pod-level lifecycle hooks: TERM signal initiates graceful drain.
 terminationGracePeriodSeconds: 90
 
+# Liveness / readiness probes. The worker does not expose an HTTP
+# health endpoint of its own, so by default the probes use a TCP probe
+# against the metrics port (which is only opened once the worker has
+# successfully started). Disable or override if you serve a richer
+# health endpoint via a sidecar.
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 30
+  periodSeconds: 30
+  failureThreshold: 3
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  failureThreshold: 3
+
 # Optional Prometheus ServiceMonitor (requires kube-prometheus-stack).
 serviceMonitor:
   enabled: false

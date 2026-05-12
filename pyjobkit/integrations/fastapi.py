@@ -29,7 +29,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from ..engine import Engine
+from ..engine import Engine, strip_internal_payload
 
 __all__ = ["make_router", "FastAPIDependencyMissing"]
 
@@ -125,6 +125,13 @@ def make_router(  # type: ignore[no-untyped-def]
         )
         return EnqueueResponse(job_id=job_id)
 
+    def _record_to_response(rec: dict[str, Any], job_id: UUID) -> JobRecordResponse:
+        scrubbed = dict(rec)
+        scrubbed["payload"] = strip_internal_payload(scrubbed.get("payload"))
+        return JobRecordResponse(
+            id=job_id, **{k: v for k, v in scrubbed.items() if k != "id"}
+        )
+
     @router.get("/jobs", response_model=list[JobRecordResponse])
     async def list_jobs(status: str | None = None, limit: int = 100) -> list[JobRecordResponse]:
         all_jobs = getattr(engine.backend, "all_jobs", None)
@@ -142,9 +149,7 @@ def make_router(  # type: ignore[no-untyped-def]
             jid = r.get("id")
             if not isinstance(jid, UUID):
                 jid = UUID(str(jid))
-            out.append(
-                JobRecordResponse(id=jid, **{k: v for k, v in r.items() if k != "id"})
-            )
+            out.append(_record_to_response(r, jid))
         return out
 
     @router.get("/jobs/{job_id}", response_model=JobRecordResponse)
@@ -153,7 +158,7 @@ def make_router(  # type: ignore[no-untyped-def]
             rec = await engine.get(job_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
-        return JobRecordResponse(id=job_id, **{k: v for k, v in rec.items() if k != "id"})
+        return _record_to_response(rec, job_id)
 
     @router.post("/jobs/{job_id}/cancel", status_code=202)
     async def cancel_job(job_id: UUID) -> dict[str, str]:

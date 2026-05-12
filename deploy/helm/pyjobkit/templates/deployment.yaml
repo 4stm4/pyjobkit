@@ -72,6 +72,22 @@ spec:
               containerPort: {{ .Values.config.metricsPort }}
               protocol: TCP
             {{- end }}
+          {{- if and .Values.livenessProbe.enabled .Values.config.metricsPort }}
+          livenessProbe:
+            tcpSocket:
+              port: metrics
+            initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
+            failureThreshold: {{ .Values.livenessProbe.failureThreshold }}
+          {{- end }}
+          {{- if and .Values.readinessProbe.enabled .Values.config.metricsPort }}
+          readinessProbe:
+            tcpSocket:
+              port: metrics
+            initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
+            failureThreshold: {{ .Values.readinessProbe.failureThreshold }}
+          {{- end }}
           resources: {{- toYaml .Values.resources | nindent 12 }}
       {{- with .Values.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}
