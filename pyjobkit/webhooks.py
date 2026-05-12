@@ -35,6 +35,7 @@ import hmac
 import json
 import logging
 import os
+import time
 from typing import Any, Mapping
 from uuid import UUID
 
@@ -44,6 +45,9 @@ from . import metrics
 
 WEBHOOK_PAYLOAD_KEY = "__pjk_webhooks"
 WEBHOOK_SECRET_ENV = "PYJOBKIT_WEBHOOK_SECRET"
+SIGNATURE_HEADER = "X-Pyjobkit-Signature"
+TIMESTAMP_HEADER = "X-Pyjobkit-Timestamp"
+DEFAULT_REPLAY_WINDOW_S = 5 * 60
 
 # Logical event -> webhook key
 _EVENT_KEYS = {
@@ -76,9 +80,48 @@ def normalize_webhooks(webhooks: Mapping[str, str] | None) -> dict[str, str] | N
     return normalized
 
 
-def _signature_header(body: bytes, secret: str) -> str:
-    digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
-    return f"sha256={digest}"
+def _digest(secret: str, payload: bytes) -> str:
+    return hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+
+
+def _signed_payload(timestamp: int, body: bytes) -> bytes:
+    return f"{timestamp}.".encode("utf-8") + body
+
+
+def _signature_header(timestamp: int, body: bytes, secret: str) -> str:
+    return "sha256=" + _digest(secret, _signed_payload(timestamp, body))
+
+
+def verify_signature(
+    *,
+    body: bytes,
+    secret: str,
+    signature_header: str | None,
+    timestamp_header: str | None,
+    replay_window_s: int = DEFAULT_REPLAY_WINDOW_S,
+    now: float | None = None,
+) -> bool:
+    """Verify a Pyjobkit webhook signature on the receiver side.
+
+    Returns ``True`` when the signature matches and the timestamp is
+    within ``replay_window_s`` of the current clock; ``False`` for any
+    malformed input. The check is constant-time.
+    """
+
+    if not signature_header or not timestamp_header:
+        return False
+    try:
+        ts = int(timestamp_header)
+    except (TypeError, ValueError):
+        return False
+    current = time.time() if now is None else now
+    if abs(current - ts) > replay_window_s:
+        return False
+    if not signature_header.startswith("sha256="):
+        return False
+    expected = _digest(secret, _signed_payload(ts, body))
+    received = signature_header.split("=", 1)[1]
+    return hmac.compare_digest(expected, received)
 
 
 async def fire(
@@ -125,7 +168,11 @@ async def fire(
     headers: dict[str, str] = {"Content-Type": "application/json"}
     effective_secret = secret if secret is not None else os.environ.get(WEBHOOK_SECRET_ENV)
     if effective_secret:
-        headers["X-Pyjobkit-Signature"] = _signature_header(raw, effective_secret)
+        # Stamping the signed payload with a timestamp lets the
+        # receiver enforce a replay window via verify_signature().
+        ts = int(time.time())
+        headers[TIMESTAMP_HEADER] = str(ts)
+        headers[SIGNATURE_HEADER] = _signature_header(ts, raw, effective_secret)
 
     async def _send_once(c: httpx.AsyncClient) -> httpx.Response:
         return await c.post(url, content=raw, headers=headers, timeout=5.0)

@@ -72,6 +72,7 @@ def make_router(  # type: ignore[no-untyped-def]
     Body = fastapi.Body
     BaseModel = pydantic.BaseModel
     Field = pydantic.Field
+    ConfigDict = pydantic.ConfigDict
 
     class EnqueueRequest(BaseModel):
         kind: str
@@ -93,6 +94,12 @@ def make_router(  # type: ignore[no-untyped-def]
         job_id: UUID
 
     class JobRecordResponse(BaseModel):
+        # 'ignore' is pydantic v2's default - declaring it explicitly
+        # so readers know unknown backend fields are intentionally
+        # dropped from the response (use a backend-specific endpoint
+        # if you need to expose them).
+        model_config = ConfigDict(extra="ignore")
+
         id: UUID
         kind: str | None = None
         status: str | None = None
@@ -170,6 +177,12 @@ def make_router(  # type: ignore[no-untyped-def]
 
     @router.post("/jobs/{job_id}/cancel", status_code=202)
     async def cancel_job(job_id: UUID) -> dict[str, str]:
+        # Verify the job exists before issuing cancel so callers get a
+        # 404 rather than a misleading 202 for typos / stale ids.
+        try:
+            await engine.get(job_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail=f"job {job_id} not found")
         await engine.cancel(job_id)
         return {"status": "cancellation_requested"}
 

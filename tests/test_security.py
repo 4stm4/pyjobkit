@@ -88,6 +88,8 @@ class _CapturingTransport(httpx.AsyncBaseTransport):
 
 
 def test_webhook_signature_header_when_secret_provided() -> None:
+    from pyjobkit.webhooks import verify_signature
+
     async def _run() -> None:
         transport = _CapturingTransport()
         client = httpx.AsyncClient(transport=transport)
@@ -105,12 +107,15 @@ def test_webhook_signature_header_when_secret_provided() -> None:
         await client.aclose()
         req = transport.requests[0]
         assert "X-Pyjobkit-Signature" in req.headers
-        sig = req.headers["X-Pyjobkit-Signature"]
-        expected = "sha256=" + hmac.new(
-            b"topsecret", req.content, hashlib.sha256
-        ).hexdigest()
-        assert sig == expected
-        # Ensure body parses cleanly.
+        assert "X-Pyjobkit-Timestamp" in req.headers
+        # The receiver-side helper must accept the produced signature.
+        assert verify_signature(
+            body=req.content,
+            secret="topsecret",
+            signature_header=req.headers["X-Pyjobkit-Signature"],
+            timestamp_header=req.headers["X-Pyjobkit-Timestamp"],
+        )
+        # Body parses cleanly.
         body = json.loads(req.content)
         assert body["status"] == "success"
 

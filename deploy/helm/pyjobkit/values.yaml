@@ -59,6 +59,10 @@ service:
 # Pod-level lifecycle hooks: TERM signal initiates graceful drain.
 terminationGracePeriodSeconds: 90
 
+# preStop sleep gives kube-proxy time to update Service endpoints
+# before the worker receives SIGTERM. Set to 0 to disable.
+preStopSleepSeconds: 5
+
 # Liveness / readiness probes. The worker does not expose an HTTP
 # health endpoint of its own, so by default the probes use a TCP probe
 # against the metrics port (which is only opened once the worker has

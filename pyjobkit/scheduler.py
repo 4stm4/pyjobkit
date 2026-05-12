@@ -18,7 +18,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Any, Awaitable, Callable
 
 from . import metrics
@@ -93,9 +93,16 @@ class Scheduler:
         name: str,
         kind: str,
         payload: dict[str, Any] | None = None,
+        run_immediately: bool = False,
         **enqueue_kwargs: Any,
     ) -> None:
-        """Register a periodic entry. Replaces any prior entry with the same name."""
+        """Register a periodic entry. Replaces any prior entry with the same name.
+
+        By default the first enqueue happens after ``interval`` has
+        elapsed. Pass ``run_immediately=True`` to also enqueue on the
+        very next :meth:`tick` (useful for warmup tasks that should
+        run on startup).
+        """
 
         td = parse_interval(interval)
         if td.total_seconds() <= 0:
@@ -108,7 +115,7 @@ class Scheduler:
             payload=dict(payload or {}),
             enqueue_kwargs=enqueue_kwargs,
             last_run=0.0,
-            next_run=now + td.total_seconds(),
+            next_run=now if run_immediately else now + td.total_seconds(),
         )
 
     def remove(self, name: str) -> None:
@@ -191,7 +198,3 @@ class Scheduler:
                 await leader_lock.release()
 
 
-def utcnow() -> datetime:
-    """Helper used by tests; equivalent to ``datetime.now(timezone.utc)``."""
-
-    return datetime.now(timezone.utc)
