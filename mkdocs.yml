@@ -36,6 +36,23 @@ nav:
   - Configuration: configuration.md
   - Production deployment: production.md
   - Cancellation: cancellation.md
+  - Components:
+    - Overview: components/index.md
+    - Engine: components/engine.md
+    - Worker: components/worker.md
+    - Backends: components/backends.md
+    - Executors: components/executors.md
+    - Retry policies: components/retry.md
+    - Scheduler: components/scheduler.md
+    - Leader election: components/leader.md
+    - Webhooks: components/webhooks.md
+    - Rate limiting: components/ratelimit.md
+    - Logging: components/logging.md
+    - Tracing: components/tracing.md
+    - Metrics: components/metrics.md
+    - Types: components/types.md
+    - CLI tools: components/cli.md
+    - FastAPI integration: components/fastapi.md
   - Extending Pyjobkit: extending.md
   - API reference: api.md
   - Stability policy: stability.md
