@@ -2,8 +2,8 @@ apiVersion: v2
 name: pyjobkit
 description: Helm chart for the Pyjobkit async job worker
 type: application
-version: 1.0.0
-appVersion: "1.0.0"
+version: 1.0.0-beta.1
+appVersion: "1.0.0b1"
 home: https://github.com/4stm4/pyjobkit
 sources:
   - https://github.com/4stm4/pyjobkit

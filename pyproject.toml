@@ -1,6 +1,6 @@
 [project]
 name = "pyjobkit"
-version = "1.0.0"
+version = "1.0.0b1"
 description = "Backend-agnostic job processing toolkit"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -10,8 +10,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-pg = ["asyncpg"]
-mysql = ["aiomysql"]
+# 'pg' pulls in both asyncpg (worker runtime) and psycopg2-binary
+# (pyjobkit-migrate rewrites the DSN to the sync driver). Same idea
+# for 'mysql' with aiomysql + pymysql.
+pg = ["asyncpg", "psycopg2-binary>=2.9"]
+mysql = ["aiomysql", "pymysql>=1.1"]
 sqlite = ["aiosqlite"]
 metrics = ["prometheus_client>=0.20"]
 docker = ["aiodocker>=0.21"]
