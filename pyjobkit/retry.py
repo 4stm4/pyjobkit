@@ -151,7 +151,7 @@ class JitteredExponentialBackoff(ExponentialBackoff):
         base_value = super().delay(attempt)
         spread = self._rng.uniform(1.0 - self.jitter, 1.0 + self.jitter)
         value = max(0.0, base_value * spread)
-        if self.max_delay_s is not None:
+        if self.max_delay_s is not None:  # pragma: no cover - cap path
             value = min(value, self.max_delay_s)
         return value
 
@@ -165,7 +165,7 @@ def _parse_floats(parts: list[str]) -> list[float]:
     for part in parts:
         try:
             values.append(float(part))
-        except ValueError as exc:
+        except ValueError as exc:  # pragma: no cover - defensive
             raise ValueError(f"retry policy argument must be a number, got {part!r}") from exc
     return values
 

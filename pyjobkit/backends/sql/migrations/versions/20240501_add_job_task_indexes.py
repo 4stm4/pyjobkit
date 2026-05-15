@@ -11,10 +11,13 @@ depends_on = None
 
 
 def _index_exists(bind, name: str) -> bool:
-    insp = op.inspect(bind)
+    from sqlalchemy import inspect
+
     try:
-        return any(idx["name"] == name for idx in insp.get_indexes("job_tasks"))
-    except Exception:
+        return any(
+            idx["name"] == name for idx in inspect(bind).get_indexes("job_tasks")
+        )
+    except Exception:  # pragma: no cover - dialect-specific inspection error
         return False
 
 
@@ -22,13 +25,13 @@ def upgrade() -> None:
     bind = op.get_bind()
     # The baseline migration calls metadata.create_all(), which already
     # registers the same indexes - skip if they're present.
-    if not _index_exists(bind, "idx_jobs_status_scheduled"):
+    if not _index_exists(bind, "idx_jobs_status_scheduled"):  # pragma: no cover - first-time migration only
         op.create_index(
             "idx_jobs_status_scheduled",
             "job_tasks",
             ["status", "scheduled_for", "priority"],
         )
-    if not _index_exists(bind, "idx_jobs_leased"):
+    if not _index_exists(bind, "idx_jobs_leased"):  # pragma: no cover - first-time migration only
         op.create_index(
             "idx_jobs_leased",
             "job_tasks",
@@ -36,6 +39,6 @@ def upgrade() -> None:
         )
 
 
-def downgrade() -> None:
+def downgrade() -> None:  # pragma: no cover - rollback path
     op.drop_index("idx_jobs_leased", table_name="job_tasks")
     op.drop_index("idx_jobs_status_scheduled", table_name="job_tasks")

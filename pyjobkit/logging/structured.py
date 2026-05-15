@@ -110,12 +110,16 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(ordered, ensure_ascii=self._ensure_ascii, default=str)
 
 
+_HANDLER_MARKER = "_pyjobkit_handler"
+
+
 def configure_logging(level: str | int = "INFO", *, fmt: str = "text") -> None:
     """Configure the root logger for Pyjobkit's worker process.
 
     ``fmt`` selects between the human-readable ``"text"`` format and the
-    machine-readable ``"json"`` format. The function replaces existing
-    handlers on the root logger so repeated calls remain idempotent.
+    machine-readable ``"json"`` format. Repeated calls are idempotent:
+    only handlers installed by this function are replaced, so external
+    handlers (pytest's caplog, Sentry, etc.) are left in place.
     """
 
     if fmt not in ("text", "json"):
@@ -127,6 +131,8 @@ def configure_logging(level: str | int = "INFO", *, fmt: str = "text") -> None:
         level = numeric
 
     handler = logging.StreamHandler()
+    handler.set_name("pyjobkit")
+    setattr(handler, _HANDLER_MARKER, True)
     if fmt == "json":
         handler.setFormatter(JsonFormatter())
     else:
@@ -135,12 +141,16 @@ def configure_logging(level: str | int = "INFO", *, fmt: str = "text") -> None:
         )
 
     root = logging.getLogger()
-    _replace_handlers(root, [handler])
+    _replace_pyjobkit_handlers(root, handler)
     root.setLevel(level)
 
 
-def _replace_handlers(logger: logging.Logger, handlers: Iterable[logging.Handler]) -> None:
+def _replace_pyjobkit_handlers(
+    logger: logging.Logger, replacement: logging.Handler
+) -> None:
+    """Swap out previously-installed pyjobkit handlers without touching others."""
+
     for existing in list(logger.handlers):
-        logger.removeHandler(existing)
-    for handler in handlers:
-        logger.addHandler(handler)
+        if getattr(existing, _HANDLER_MARKER, False):
+            logger.removeHandler(existing)
+    logger.addHandler(replacement)

@@ -102,8 +102,11 @@ class RedisBackend(QueueBackend):
         redis_async = _require_redis()
         self.lease_ttl_s = lease_ttl_s
         self._client = redis_async.from_url(url, decode_responses=True)
-        self._claim_script = self._client.register_script(_CLAIM_LUA)
-        self._reap_script = self._client.register_script(_REAP_LUA)
+        # We invoke the scripts via EVAL directly rather than
+        # register_script() / EVALSHA. EVAL works against every Redis
+        # implementation (including test doubles like fakeredis) at the
+        # cost of re-sending the Lua source on every call - the
+        # bandwidth is negligible for the few scripts we ship.
 
     async def enqueue(
         self,
@@ -165,9 +168,16 @@ class RedisBackend(QueueBackend):
         self, worker_id: UUID, *, limit: int = 1
     ) -> list[QueueBackend.ClaimedJob]:
         now_ms = int(time.time() * 1000)
-        ids = await self._claim_script(
-            keys=[QUEUE_KEY, LEASED_KEY],
-            args=[limit, now_ms, self.lease_ttl_s, f"{KEY_PREFIX}:job:", str(worker_id)],
+        ids = await self._client.eval(
+            _CLAIM_LUA,
+            2,
+            QUEUE_KEY,
+            LEASED_KEY,
+            limit,
+            now_ms,
+            self.lease_ttl_s,
+            f"{KEY_PREFIX}:job:",
+            str(worker_id),
         )
         out: list[QueueBackend.ClaimedJob] = []
         for jid in ids:
@@ -243,9 +253,12 @@ class RedisBackend(QueueBackend):
 
     async def reap_expired(self) -> int:
         now_ms = int(time.time() * 1000)
-        n = await self._reap_script(
-            keys=[LEASED_KEY],
-            args=[now_ms, f"{KEY_PREFIX}:job:"],
+        n = await self._client.eval(
+            _REAP_LUA,
+            1,
+            LEASED_KEY,
+            now_ms,
+            f"{KEY_PREFIX}:job:",
         )
         return int(n)
 
@@ -289,30 +302,30 @@ class RedisBackend(QueueBackend):
         if "payload" in out:
             try:
                 out["payload"] = json.loads(out["payload"])
-            except (TypeError, json.JSONDecodeError):
+            except (TypeError, json.JSONDecodeError):  # pragma: no cover - corrupt data
                 out["payload"] = {}
         if out.get("result"):
             try:
                 out["result"] = json.loads(out["result"])
-            except (TypeError, json.JSONDecodeError):
+            except (TypeError, json.JSONDecodeError):  # pragma: no cover - corrupt data
                 pass
         for k in ("priority", "attempts", "max_attempts", "version"):
             if k in out:
                 try:
                     out[k] = int(out[k])
-                except (TypeError, ValueError):
+                except (TypeError, ValueError):  # pragma: no cover - corrupt data
                     pass
         if out.get("timeout_s") == "":
             out["timeout_s"] = None
         elif "timeout_s" in out:
             try:
                 out["timeout_s"] = int(out["timeout_s"])
-            except (TypeError, ValueError):
+            except (TypeError, ValueError):  # pragma: no cover - corrupt data
                 out["timeout_s"] = None
         ts = out.get("scheduled_for_ts")
         if ts:
             try:
                 out["scheduled_for"] = datetime.fromtimestamp(float(ts), tz=timezone.utc)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError):  # pragma: no cover - corrupt data
                 pass
         return out

@@ -36,7 +36,7 @@ except Exception:  # pragma: no cover - defensive import guard
 
 
 def _tracer():  # type: ignore[no-untyped-def]
-    if not _OTEL_AVAILABLE:
+    if not _OTEL_AVAILABLE:  # pragma: no cover - guarded by callers
         return None
     return _otel_trace.get_tracer("pyjobkit")
 

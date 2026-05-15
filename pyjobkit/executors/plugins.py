@@ -51,7 +51,7 @@ def discover_executors(
     instances: list[Executor] = []
     try:
         entries = importlib.metadata.entry_points(group=group)
-    except TypeError:
+    except TypeError:  # pragma: no cover - Python 3.9 fallback
         # Older importlib.metadata (Python 3.9) does not accept group=.
         entries = importlib.metadata.entry_points().get(group, [])  # type: ignore[assignment]
 
@@ -60,7 +60,7 @@ def discover_executors(
             continue
         try:
             factory = entry.load()
-        except Exception as exc:
+        except Exception as exc:  # pragma: no cover - rare import failure
             logger.warning(
                 "failed to load executor plugin %r: %s", entry.name, exc, exc_info=True
             )

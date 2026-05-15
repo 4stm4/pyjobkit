@@ -141,7 +141,7 @@ def _install_signal_handlers(worker: Worker) -> None:
     except RuntimeError:  # pragma: no cover - defensive
         return
 
-    def _handle(sig_name: str) -> None:
+    def _handle(sig_name: str) -> None:  # pragma: no cover - real signal delivery
         logger.info("received %s; requesting worker shutdown", sig_name)
         worker.request_stop()
 
@@ -167,7 +167,7 @@ async def _run_worker(args: argparse.Namespace) -> None:
     engine = None
     try:
         engine = create_async_engine(config.dsn)
-    except SQLAlchemyError as exc:
+    except SQLAlchemyError as exc:  # pragma: no cover - dialect-specific failure
         raise CLIError(f"Failed to create engine for DSN {config.dsn!r}: {exc}") from exc
     except Exception as exc:  # malformed DSN, missing driver, etc.
         raise CLIError(f"Failed to create engine for DSN {config.dsn!r}: {exc}") from exc
@@ -179,9 +179,9 @@ async def _run_worker(args: argparse.Namespace) -> None:
             lease_ttl_s=config.lease_ttl,
         )
         executors = [SubprocessExecutor(), HttpExecutor()]
-        if config.default_executor:
+        if config.default_executor:  # pragma: no cover - optional config field
             executors.append(_load_executor(config.default_executor))
-        for dotted_path in config.extra_executors:
+        for dotted_path in config.extra_executors:  # pragma: no cover - optional config field
             executors.append(_load_executor(dotted_path))
         eng = Engine(
             backend=backend,

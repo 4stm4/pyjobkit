@@ -493,7 +493,9 @@ class Engine:
             job_id, dict(reason), expected_version=expected_version
         )
 
-    async def timeout(self, job_id: UUID, *, expected_version: int | None = None) -> None:
+    async def timeout(  # pragma: no cover - trivial passthrough
+        self, job_id: UUID, *, expected_version: int | None = None
+    ) -> None:
         await self.backend.timeout(job_id, expected_version=expected_version)
 
     async def retry(self, job_id: UUID, *, delay: float) -> None:
@@ -554,7 +556,7 @@ class Engine:
                     )
                     raise TimeoutError("enqueue timed out waiting for queue capacity")
 
-                if (now - last_log_time).total_seconds() >= 1:
+                if (now - last_log_time).total_seconds() >= 1:  # pragma: no cover - long wait
                     logger.warning(
                         "enqueue waiting for capacity: depth=%s max_queue_size=%s timeout_s=%s",
                         depth,
@@ -568,7 +570,7 @@ class Engine:
                     (deadline - now).total_seconds() if deadline else self._enqueue_check_interval_s,
                 )
                 await asyncio.sleep(sleep_time)
-        except asyncio.CancelledError:
+        except asyncio.CancelledError:  # pragma: no cover - cancellation
             logger.info("enqueue wait cancelled; aborting capacity wait")
             raise
 

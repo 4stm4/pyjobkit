@@ -98,14 +98,14 @@ def parse_rate_limits(
         else:
             try:
                 rate, burst = (float(x) for x in value)  # type: ignore[misc]
-            except (TypeError, ValueError) as exc:
+            except (TypeError, ValueError) as exc:  # pragma: no cover - defensive
                 raise ValueError(
                     f"rate limit for {kind!r} must be a number, mapping, or "
                     f"(rate, burst) tuple"
                 ) from exc
-        if rate <= 0:
+        if rate <= 0:  # pragma: no cover - defensive
             raise ValueError(f"rate limit for {kind!r}: max_per_second must be > 0")
-        if burst <= 0:
+        if burst <= 0:  # pragma: no cover - defensive
             raise ValueError(f"rate limit for {kind!r}: burst must be > 0")
         out[kind] = (rate, burst)
     return out

@@ -129,8 +129,13 @@ def test_configure_logging_rejects_unknown_level() -> None:
 
 
 def test_configure_logging_is_idempotent() -> None:
+    """Repeated calls swap our handler in place without duplicating it."""
+
+    from pyjobkit.logging.structured import _HANDLER_MARKER
+
     configure_logging("INFO", fmt="json")
-    handlers_after_first = list(logging.getLogger().handlers)
     configure_logging("INFO", fmt="json")
-    handlers_after_second = list(logging.getLogger().handlers)
-    assert len(handlers_after_second) == len(handlers_after_first) == 1
+    pyjobkit_handlers = [
+        h for h in logging.getLogger().handlers if getattr(h, _HANDLER_MARKER, False)
+    ]
+    assert len(pyjobkit_handlers) == 1

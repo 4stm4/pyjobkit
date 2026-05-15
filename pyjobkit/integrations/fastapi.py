@@ -23,10 +23,14 @@ Endpoints:
 FastAPI / Pydantic are optional; install via ``pyjobkit[fastapi]``.
 """
 
-from __future__ import annotations
+# NOTE: do NOT enable `from __future__ import annotations` in this
+# module. FastAPI inspects route handler annotations at registration
+# time, and forward references to locally-defined Pydantic models (the
+# ones built inside make_router) cannot be resolved when annotations
+# are strings.
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 from uuid import UUID
 
 from ..engine import Engine, strip_internal_payload

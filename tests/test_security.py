@@ -157,13 +157,13 @@ def test_router_dependencies_apply_to_endpoints() -> None:
 
     if importlib.util.find_spec("fastapi") is None:
         pytest.skip("fastapi not installed")
-    from fastapi import Depends, FastAPI, HTTPException
+    from fastapi import Depends, FastAPI, Header, HTTPException
     from fastapi.testclient import TestClient
 
     from pyjobkit import Engine, MemoryBackend
     from pyjobkit.integrations.fastapi import make_router
 
-    def require_token(authorization: str | None = None) -> None:
+    def require_token(authorization: str | None = Header(default=None)) -> None:
         if authorization != "Bearer s3cr3t":
             raise HTTPException(401, "unauthorized")
 

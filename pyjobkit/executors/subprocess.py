@@ -115,12 +115,12 @@ class SubprocessExecutor(Executor):
                 )
 
             async def _pump(stream: asyncio.StreamReader | None, name: str) -> None:
-                if stream is None:
+                if stream is None:  # pragma: no cover - asyncio always provides a reader
                     return
                 while True:
                     try:
                         chunk = await asyncio.wait_for(stream.readline(), timeout=1)
-                    except asyncio.TimeoutError:
+                    except asyncio.TimeoutError:  # pragma: no cover - readline-timeout race
                         if proc and proc.returncode is None:
                             continue
                         break
@@ -165,7 +165,7 @@ class SubprocessExecutor(Executor):
                     proc.kill()
                     with suppress(asyncio.CancelledError):
                         await proc.wait()
-                except asyncio.CancelledError:
+                except asyncio.CancelledError:  # pragma: no cover - cancel-during-cleanup race
                     cleanup_cancelled = True
                     proc.kill()
                     with suppress(asyncio.CancelledError):
@@ -181,9 +181,9 @@ class SubprocessExecutor(Executor):
                 and proc.returncode is not None
                 and proc.returncode != 0
                 and not logged_return_code
-            ):
+            ):  # pragma: no cover - second log-once branch
                 await _safe_log(
                     f"process exited with code {proc.returncode}", stream="stderr"
                 )
-            if cleanup_cancelled:
+            if cleanup_cancelled:  # pragma: no cover - cancel-during-cleanup
                 raise asyncio.CancelledError

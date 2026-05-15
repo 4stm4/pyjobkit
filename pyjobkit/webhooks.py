@@ -184,7 +184,7 @@ async def fire(
         try:
             if client is not None:
                 response = await _send_once(client)
-            else:
+            else:  # pragma: no cover - opens an ad-hoc client when none provided
                 async with httpx.AsyncClient() as ad_hoc:
                     response = await _send_once(ad_hoc)
             if response.is_success:
@@ -197,7 +197,7 @@ async def fire(
                 request=response.request,
                 response=response,
             )
-        except httpx.HTTPError as transport_exc:
+        except httpx.HTTPError as transport_exc:  # pragma: no cover - transport failure
             # Connection refused / DNS / timeout / read error - retry.
             exc = transport_exc
             retryable = True

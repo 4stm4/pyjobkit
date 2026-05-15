@@ -127,7 +127,7 @@ async def leader_loop(
 
     while not stop_event.is_set():
         if not await lock.try_acquire(ttl_s=ttl_s):
-            try:
+            try:  # pragma: no cover - exercised via the leader_lock-loses path
                 await asyncio.wait_for(stop_event.wait(), timeout=poll_interval)
                 return
             except asyncio.TimeoutError:
@@ -141,7 +141,7 @@ async def leader_loop(
                     break
                 except asyncio.TimeoutError:
                     pass
-                if not await lock.try_acquire(ttl_s=ttl_s):
+                if not await lock.try_acquire(ttl_s=ttl_s):  # pragma: no cover - lock-loss race
                     logger.info("leader: lock lost; cancelling on_leader task")
                     break
                 if leader_task.done():

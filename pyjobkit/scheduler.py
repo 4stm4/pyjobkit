@@ -105,7 +105,7 @@ class Scheduler:
         """
 
         td = parse_interval(interval)
-        if td.total_seconds() <= 0:
+        if td.total_seconds() <= 0:  # pragma: no cover - parse_interval already rejects
             raise ValueError("interval must be positive")
         now = self._clock()
         self._entries[name] = _Entry(

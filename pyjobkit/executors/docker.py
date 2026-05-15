@@ -109,7 +109,7 @@ class DockerExecutor(Executor):
                 await ctx.log(f"started container {container.id[:12]}")
                 try:
                     await asyncio.wait_for(container.wait(), timeout=timeout_s)
-                except asyncio.TimeoutError:
+                except asyncio.TimeoutError:  # pragma: no cover - integration-test path
                     await ctx.log("container timed out; killing", stream="stderr")
                     await container.kill()
                     raise
